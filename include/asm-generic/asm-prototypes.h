@@ -12,3 +12,8 @@ extern void *memset(void *, int, __kernel_size_t);
 extern void *memcpy(void *, const void *, __kernel_size_t);
 #undef memmove
 extern void *memmove(void *, const void *, __kernel_size_t);
+struct label_t;
+#undef setjmp
+extern int setjmp(struct label_t *);
+#undef longjmp
+extern void longjmp(struct label_t *, int);
