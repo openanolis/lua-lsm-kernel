@@ -31,7 +31,11 @@
 #ifndef	_SYS_TREE_H_
 #define	_SYS_TREE_H_
 
-#include <sys/cdefs.h>
+#include <linux/types.h>
+
+typedef uintptr_t __uintptr_t;
+#define __unused __maybe_unused
+
 
 /*
  * This file defines data structures for different types of trees:

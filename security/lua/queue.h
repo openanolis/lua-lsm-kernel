@@ -32,8 +32,6 @@
 #ifndef _SYS_QUEUE_H_
 #define	_SYS_QUEUE_H_
 
-#include <sys/cdefs.h>
-
 /*
  * This file defines four types of data structures: singly-linked lists,
  * singly-linked tail queues, lists and tail queues.
@@ -441,7 +439,7 @@ struct {								\
 
 #define	STAILQ_LAST(head, type, field)					\
 	(STAILQ_EMPTY((head)) ? NULL :					\
-	    __containerof((head)->stqh_last,				\
+	    container_of((head)->stqh_last,				\
 	    QUEUE_TYPEOF(type), field.stqe_next))
 
 #define	STAILQ_NEXT(elm, field)	((elm)->field.stqe_next)
@@ -639,7 +637,7 @@ struct {								\
 
 #define	LIST_PREV(elm, head, type, field)				\
 	((elm)->field.le_prev == &LIST_FIRST((head)) ? NULL :		\
-	    __containerof((elm)->field.le_prev,				\
+	    container_of((elm)->field.le_prev,				\
 	    QUEUE_TYPEOF(type), field.le_next))
 
 #define LIST_REMOVE_HEAD(head, field)					\
@@ -898,7 +896,7 @@ struct {								\
  * you may want to prefetch the last data element.
  */
 #define	TAILQ_LAST_FAST(head, type, field)				\
-    (TAILQ_EMPTY(head) ? NULL : __containerof((head)->tqh_last, QUEUE_TYPEOF(type), field.tqe_next))
+    (TAILQ_EMPTY(head) ? NULL : container_of((head)->tqh_last, QUEUE_TYPEOF(type), field.tqe_next))
 
 #define	TAILQ_NEXT(elm, field) ((elm)->field.tqe_next)
 
@@ -907,7 +905,7 @@ struct {								\
 
 #define	TAILQ_PREV_FAST(elm, head, type, field)				\
     ((elm)->field.tqe_prev == &(head)->tqh_first ? NULL :		\
-     __containerof((elm)->field.tqe_prev, QUEUE_TYPEOF(type), field.tqe_next))
+     container_of((elm)->field.tqe_prev, QUEUE_TYPEOF(type), field.tqe_next))
 
 #define TAILQ_REMOVE_HEAD(head, field)					\
 	TAILQ_REMOVE(head, TAILQ_FIRST(head), field)
