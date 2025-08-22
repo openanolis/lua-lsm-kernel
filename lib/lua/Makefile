@@ -27,9 +27,6 @@ lua-lib-y := \
 	lauxlib.o \
 	lbaselib.o \
 	ldblib.o \
-	liolib.o \
-	lmathlib.o \
-	loslib.o \
 	ltablib.o \
 	lstrlib.o \
 	loadlib.o \
