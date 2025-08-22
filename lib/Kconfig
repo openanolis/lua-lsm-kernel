@@ -636,3 +636,15 @@ config UNION_FIND
 
 config MIN_HEAP
 	bool
+
+config ARCH_HAS_SETJMP
+	bool
+
+config SETJMP_ARCH
+	tristate
+	depends on ARCH_HAS_SETJMP
+
+config LUA
+	tristate
+	default n
+	select SETJMP_ARCH
