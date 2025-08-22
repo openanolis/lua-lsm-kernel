@@ -9,8 +9,9 @@
 #ifndef lua_h
 #define lua_h
 
-#include <stdarg.h>
-#include <stddef.h>
+#include <linux/types.h>
+#include <linux/stdarg.h>
+#include <asm/bug.h>
 
 
 #include "luaconf.h"

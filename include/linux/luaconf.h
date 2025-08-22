@@ -8,8 +8,9 @@
 #ifndef lconfig_h
 #define lconfig_h
 
-#include <limits.h>
-#include <stddef.h>
+#include <linux/limits.h>
+#include <linux/stddef.h>
+#include <linux/kstrtox.h>
 
 
 /*
@@ -140,7 +141,11 @@
 ** CHANGE that if ptrdiff_t is not adequate on your machine. (On most
 ** machines, ptrdiff_t gives a good choice between int or long.)
 */
+#ifdef __KERNEL__
+#define LUA_INTEGER	LUA_NUMBER
+#else
 #define LUA_INTEGER	ptrdiff_t
+#endif
 
 
 /*
@@ -378,7 +383,7 @@
 #include <assert.h>
 #define luai_apicheck(L,o)	{ (void)L; assert(o); }
 #else
-#define luai_apicheck(L,o)	{ (void)L; }
+#define luai_apicheck(L,o)	{ (void)L; WARN_ON(!(o)); }
 #endif
 
 
@@ -387,15 +392,7 @@
 ** CHANGE here if Lua cannot automatically detect the number of bits of
 ** your machine. Probably you do not need to change this.
 */
-/* avoid overflows in comparison */
-#if INT_MAX-20 < 32760
-#define LUAI_BITSINT	16
-#elif INT_MAX > 2147483640L
-/* int has at least 32 bits */
 #define LUAI_BITSINT	32
-#else
-#error "you must define LUA_BITSINT with number of bits in an integer"
-#endif
 
 
 /*
@@ -485,7 +482,7 @@
 /*
 @@ LUAL_BUFFERSIZE is the buffer size used by the lauxlib buffer system.
 */
-#define LUAL_BUFFERSIZE		BUFSIZ
+#define LUAL_BUFFERSIZE		1024
 
 /* }================================================================== */
 
@@ -501,15 +498,18 @@
 ** ===================================================================
 */
 
+#ifdef __KERNEL__
+#define LUA_NUMBER	long long
+#else
 #define LUA_NUMBER_DOUBLE
 #define LUA_NUMBER	double
+#endif
 
 /*
 @@ LUAI_UACNUMBER is the result of an 'usual argument conversion'
 @* over a number.
 */
-#define LUAI_UACNUMBER	double
-
+#define LUAI_UACNUMBER	LUA_NUMBER	
 
 /*
 @@ LUA_NUMBER_SCAN is the format for reading numbers.
@@ -518,24 +518,38 @@
 @@ LUAI_MAXNUMBER2STR is maximum size of previous conversion.
 @@ lua_str2number converts a string to a number.
 */
+#ifdef __KERNEL__
+#define LUA_NUMBER_SCAN		"%lld"
+#define LUA_NUMBER_FMT		"%lld"
+#define lua_str2number(s,p)	simple_strtoul((s), (p), 10)
+#else
 #define LUA_NUMBER_SCAN		"%lf"
 #define LUA_NUMBER_FMT		"%.14g"
-#define lua_number2str(s,n)	sprintf((s), LUA_NUMBER_FMT, (n))
-#define LUAI_MAXNUMBER2STR	32 /* 16 digits, sign, point, and \0 */
 #define lua_str2number(s,p)	strtod((s), (p))
+#endif
 
+#define lua_number2str(s,l,n)	snprintf((s), (l), LUA_NUMBER_FMT, (n))
+#define LUAI_MAXNUMBER2STR	32 /* 16 digits, sign, point, and \0 */
 
 /*
 @@ The luai_num* macros define the primitive operations over numbers.
 */
 #if defined(LUA_CORE)
+#ifdef __KERNEL__
+/* XXX: we should raise an error instead of return INTMAX_MAX */
+#define luai_numdiv(a,b)	((b) != 0 ? (a)/(b) : INT_MAX)
+#define luai_nummod(a,b)	((a)%(b))
+#define luai_numpow(a,b)	luai_nummul(a,b)
+#else
 #include <math.h>
-#define luai_numadd(a,b)	((a)+(b))
-#define luai_numsub(a,b)	((a)-(b))
-#define luai_nummul(a,b)	((a)*(b))
 #define luai_numdiv(a,b)	((a)/(b))
 #define luai_nummod(a,b)	((a) - floor((a)/(b))*(b))
 #define luai_numpow(a,b)	(pow(a,b))
+#endif
+
+#define luai_numadd(a,b)	((a)+(b))
+#define luai_numsub(a,b)	((a)-(b))
+#define luai_nummul(a,b)	((a)*(b))
 #define luai_numunm(a)		(-(a))
 #define luai_numeq(a,b)		((a)==(b))
 #define luai_numlt(a,b)		((a)<(b))
@@ -603,7 +617,12 @@ union luai_Cast { double l_d; long l_l; };
 ** compiling as C++ code, with _longjmp/_setjmp when asked to use them,
 ** and with longjmp/setjmp otherwise.
 */
-#if defined(__cplusplus)
+#ifdef __KERNEL__
+#define LUAI_THROW(L,c)	longjmp(& ((c)->b), 1)
+#define LUAI_TRY(L,c,a)	if (setjmp(& ((c)->b)) == 0) { a }
+#define luai_jmpbuf	struct label_t
+
+#elif defined(__cplusplus)
 /* C++ exceptions */
 #define LUAI_THROW(L,c)	throw(c)
 #define LUAI_TRY(L,c,a)	try { a } catch(...) \
@@ -736,7 +755,13 @@ union luai_Cast { double l_d; long l_l; };
 ** CHANGE them if your system supports long long or does not support long.
 */
 
-#if defined(LUA_USELONGLONG)
+#ifdef __KERNEL__
+
+#define LUA_INTFRMLEN		"ll"
+#define LUA_INTFRM_T		intptr_t
+#define LUA_UINTFRM_T		uintptr_t
+
+#elif defined(LUA_USELONGLONG)
 
 #define LUA_INTFRMLEN		"ll"
 #define LUA_INTFRM_T		long long
