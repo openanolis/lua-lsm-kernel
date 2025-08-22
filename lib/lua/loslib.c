@@ -14,10 +14,10 @@
 #define loslib_c
 #define LUA_LIB
 
-#include "lua.h"
+#include <linux/lua.h>
 
-#include "lauxlib.h"
-#include "lualib.h"
+#include <linux/lauxlib.h>
+#include <linux/lualib.h>
 
 
 static int os_pushresult (lua_State *L, int i, const char *filename) {

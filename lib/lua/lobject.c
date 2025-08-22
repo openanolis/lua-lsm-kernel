@@ -4,16 +4,15 @@
 ** See Copyright Notice in lua.h
 */
 
-#include <ctype.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <linux/ctype.h>
+#include <linux/stdarg.h>
+#include <linux/sprintf.h>
+#include <linux/string.h>
 
 #define lobject_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "ldo.h"
 #include "lmem.h"
@@ -92,7 +91,7 @@ int luaO_str2d (const char *s, lua_Number *result) {
   *result = lua_str2number(s, &endptr);
   if (endptr == s) return 0;  /* conversion failed */
   if (*endptr == 'x' || *endptr == 'X')  /* maybe an hexadecimal constant? */
-    *result = cast_num(strtoul(s, &endptr, 16));
+    *result = cast_num(simple_strtoul(s, &endptr, 16));
   if (*endptr == '\0') return 1;  /* most common case */
   while (isspace(cast(unsigned char, *endptr))) endptr++;
   if (*endptr != '\0') return 0;  /* invalid trailing characters? */
@@ -142,7 +141,7 @@ const char *luaO_pushvfstring (lua_State *L, const char *fmt, va_list argp) {
       }
       case 'p': {
         char buff[4*sizeof(void *) + 8]; /* should be enough space for a `%p' */
-        sprintf(buff, "%p", va_arg(argp, void *));
+        snprintf(buff, sizeof(buff), "%p", va_arg(argp, void *));
         pushstr(L, buff);
         break;
       }

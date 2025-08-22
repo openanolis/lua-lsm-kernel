@@ -5,12 +5,10 @@
 */
 
 
-#include <ctype.h>
-#include <errno.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <linux/ctype.h>
+#include <linux/stdarg.h>
+#include <linux/sprintf.h>
+#include <linux/string.h>
 
 
 /* This file uses only the official API of Lua.
@@ -20,9 +18,9 @@
 #define lauxlib_c
 #define LUA_LIB
 
-#include "lua.h"
+#include <linux/lua.h>
 
-#include "lauxlib.h"
+#include <linux/lauxlib.h>
 
 
 #define FREELIST_REF	0	/* free list of references */
@@ -519,6 +517,7 @@ LUALIB_API void luaL_unref (lua_State *L, int t, int ref) {
 ** =======================================================
 */
 
+#ifndef __KERNEL__
 typedef struct LoadF {
   int extraline;
   FILE *f;
@@ -588,6 +587,7 @@ LUALIB_API int luaL_loadfile (lua_State *L, const char *filename) {
   lua_remove(L, fnameindex);
   return status;
 }
+#endif
 
 
 typedef struct LoadS {
@@ -624,6 +624,7 @@ LUALIB_API int (luaL_loadstring) (lua_State *L, const char *s) {
 /* }====================================================== */
 
 
+#ifndef __KERNEL__
 static void *l_alloc (void *ud, void *ptr, size_t osize, size_t nsize) {
   (void)ud;
   (void)osize;
@@ -649,4 +650,5 @@ LUALIB_API lua_State *luaL_newstate (void) {
   if (L) lua_atpanic(L, &panic);
   return L;
 }
+#endif
 

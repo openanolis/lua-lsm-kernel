@@ -5,15 +5,13 @@
 */
 
 
-#include <assert.h>
-#include <math.h>
-#include <stdarg.h>
-#include <string.h>
+#include <linux/stdarg.h>
+#include <linux/string.h>
 
 #define lapi_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "lapi.h"
 #include "ldebug.h"

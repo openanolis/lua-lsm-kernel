@@ -5,12 +5,12 @@
 */
 
 
-#include <string.h>
+#include <linux/string.h>
 
 #define lzio_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "llimits.h"
 #include "lmem.h"

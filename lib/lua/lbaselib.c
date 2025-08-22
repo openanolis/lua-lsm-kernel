@@ -5,19 +5,21 @@
 */
 
 
+#define pr_fmt(fmt)	"lua: " fmt
 
-#include <ctype.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <linux/ctype.h>
+#include <linux/stdarg.h>
+#include <linux/printk.h>
+#include <linux/sprintf.h>
+#include <linux/string.h>
 
 #define lbaselib_c
 #define LUA_LIB
 
-#include "lua.h"
+#include <linux/lua.h>
 
-#include "lauxlib.h"
-#include "lualib.h"
+#include <linux/lauxlib.h>
+#include <linux/lualib.h>
 
 
 
@@ -41,11 +43,11 @@ static int luaB_print (lua_State *L) {
     if (s == NULL)
       return luaL_error(L, LUA_QL("tostring") " must return a string to "
                            LUA_QL("print"));
-    if (i>1) fputs("\t", stdout);
-    fputs(s, stdout);
+    if (i>1) pr_info("\t");
+    pr_info("%s", s);
     lua_pop(L, 1);  /* pop result */
   }
-  fputs("\n", stdout);
+  pr_info("\n");
   return 0;
 }
 
@@ -64,7 +66,7 @@ static int luaB_tonumber (lua_State *L) {
     char *s2;
     unsigned long n;
     luaL_argcheck(L, 2 <= base && base <= 36, 2, "base out of range");
-    n = strtoul(s1, &s2, base);
+    n = simple_strtoul(s1, &s2, base);
     if (s1 != s2) {  /* at least one valid digit? */
       while (isspace((unsigned char)(*s2))) s2++;  /* skip trailing spaces */
       if (*s2 == '\0') {  /* no invalid trailing characters? */
@@ -282,10 +284,12 @@ static int luaB_loadstring (lua_State *L) {
 }
 
 
+#ifndef __KERNEL__
 static int luaB_loadfile (lua_State *L) {
   const char *fname = luaL_optstring(L, 1, NULL);
   return load_aux(L, luaL_loadfile(L, fname));
 }
+#endif
 
 
 /*
@@ -322,6 +326,7 @@ static int luaB_load (lua_State *L) {
 }
 
 
+#ifndef __KERNEL__
 static int luaB_dofile (lua_State *L) {
   const char *fname = luaL_optstring(L, 1, NULL);
   int n = lua_gettop(L);
@@ -329,6 +334,7 @@ static int luaB_dofile (lua_State *L) {
   lua_call(L, 0, LUA_MULTRET);
   return lua_gettop(L) - n;
 }
+#endif
 
 
 static int luaB_assert (lua_State *L) {
@@ -447,12 +453,16 @@ static int luaB_newproxy (lua_State *L) {
 static const luaL_Reg base_funcs[] = {
   {"assert", luaB_assert},
   {"collectgarbage", luaB_collectgarbage},
+#ifndef __KERNEL__
   {"dofile", luaB_dofile},
+#endif
   {"error", luaB_error},
   {"gcinfo", luaB_gcinfo},
   {"getfenv", luaB_getfenv},
   {"getmetatable", luaB_getmetatable},
+#ifndef __KERNEL__
   {"loadfile", luaB_loadfile},
+#endif
   {"load", luaB_load},
   {"loadstring", luaB_loadstring},
   {"next", luaB_next},

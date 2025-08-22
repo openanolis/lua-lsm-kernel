@@ -8,11 +8,11 @@
 #define llimits_h
 
 
-#include <limits.h>
-#include <stddef.h>
+#include <linux/limits.h>
+#include <linux/stddef.h>
 
 
-#include "lua.h"
+#include <linux/lua.h>
 
 
 typedef LUAI_UINT32 lu_int32;

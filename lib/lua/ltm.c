@@ -5,12 +5,12 @@
 */
 
 
-#include <string.h>
+#include <linux/string.h>
 
 #define ltm_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "lobject.h"
 #include "lstate.h"

@@ -5,12 +5,12 @@
 */
 
 
-#include <string.h>
+#include <linux/string.h>
 
 #define lparser_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "lcode.h"
 #include "ldebug.h"

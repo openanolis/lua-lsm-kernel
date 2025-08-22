@@ -5,12 +5,12 @@
 */
 
 
-#include <stdlib.h>
+#include <linux/math.h>
 
 #define lcode_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "lcode.h"
 #include "ldebug.h"

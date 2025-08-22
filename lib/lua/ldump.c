@@ -4,12 +4,10 @@
 ** See Copyright Notice in lua.h
 */
 
-#include <stddef.h>
-
 #define ldump_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "lobject.h"
 #include "lstate.h"
@@ -60,7 +58,7 @@ static void DumpVector(const void* b, int n, size_t size, DumpState* D)
 
 static void DumpString(const TString* s, DumpState* D)
 {
- if (s==NULL || getstr(s)==NULL)
+ if (s==NULL)
  {
   size_t size=0;
   DumpVar(size,D);

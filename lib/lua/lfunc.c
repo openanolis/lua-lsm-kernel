@@ -5,12 +5,10 @@
 */
 
 
-#include <stddef.h>
-
 #define lfunc_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "lfunc.h"
 #include "lgc.h"

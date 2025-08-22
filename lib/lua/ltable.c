@@ -18,13 +18,13 @@
 ** Hence even when the load factor reaches 100%, performance remains good.
 */
 
-#include <math.h>
-#include <string.h>
+#include <linux/math.h>
+#include <linux/string.h>
 
 #define ltable_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "ldebug.h"
 #include "ldo.h"
@@ -478,6 +478,7 @@ const TValue *luaH_get (Table *t, const TValue *key) {
         return luaH_getnum(t, k);  /* use specialized version */
       /* else go through */
     }
+    fallthrough;
     default: {
       Node *n = mainposition(t, key);
       do {  /* check whether `key' is somewhere in the chain */

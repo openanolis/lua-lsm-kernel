@@ -5,17 +5,17 @@
 */
 
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <linux/stdarg.h>
+#include <linux/sprintf.h>
+#include <linux/string.h>
 
 #define ldblib_c
 #define LUA_LIB
 
-#include "lua.h"
+#include <linux/lua.h>
 
-#include "lauxlib.h"
-#include "lualib.h"
+#include <linux/lauxlib.h>
+#include <linux/lualib.h>
 
 
 
@@ -299,6 +299,7 @@ static int db_gethook (lua_State *L) {
 }
 
 
+#ifndef __KERNEL__
 static int db_debug (lua_State *L) {
   for (;;) {
     char buffer[250];
@@ -314,6 +315,7 @@ static int db_debug (lua_State *L) {
     lua_settop(L, 0);  /* remove eventual returns */
   }
 }
+#endif
 
 
 #define LEVELS1	12	/* size of the first part of the stack */
@@ -373,7 +375,9 @@ static int db_errorfb (lua_State *L) {
 
 
 static const luaL_Reg dblib[] = {
+#ifndef __KERNEL__
   {"debug", db_debug},
+#endif
   {"getfenv", db_getfenv},
   {"gethook", db_gethook},
   {"getinfo", db_getinfo},

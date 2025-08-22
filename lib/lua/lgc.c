@@ -4,12 +4,12 @@
 ** See Copyright Notice in lua.h
 */
 
-#include <string.h>
+#include <linux/string.h>
 
 #define lgc_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "ldebug.h"
 #include "ldo.h"

@@ -5,14 +5,14 @@
 */
 
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <linux/stdarg.h>
+#include <linux/sprintf.h>
+#include <linux/string.h>
 
 #define lvm_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "ldebug.h"
 #include "ldo.h"
@@ -50,7 +50,7 @@ int luaV_tostring (lua_State *L, StkId obj) {
   else {
     char s[LUAI_MAXNUMBER2STR];
     lua_Number n = nvalue(obj);
-    lua_number2str(s, n);
+    lua_number2str(s, sizeof(s), n);
     setsvalue2s(L, obj, luaS_new(L, s));
     return 1;
   }
@@ -206,7 +206,7 @@ static int l_strcmp (const TString *ls, const TString *rs) {
   const char *r = getstr(rs);
   size_t lr = rs->tsv.len;
   for (;;) {
-    int temp = strcoll(l, r);
+    int temp = strcmp(l, r);
     if (temp != 0) return temp;
     else {  /* strings are equal up to a `\0' */
       size_t len = strlen(l);  /* index of first `\0' in both strings */

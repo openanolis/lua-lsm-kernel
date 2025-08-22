@@ -5,14 +5,13 @@
 */
 
 
-#include <ctype.h>
-#include <locale.h>
-#include <string.h>
+#include <linux/ctype.h>
+#include <linux/string.h>
 
 #define llex_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "ldo.h"
 #include "llex.h"
@@ -23,6 +22,9 @@
 #include "ltable.h"
 #include "lzio.h"
 
+#ifndef UCHAR_MAX
+#define UCHAR_MAX	((unsigned char)~0U)
+#endif
 
 
 #define next(ls) (ls->current = zgetc(ls->z))
@@ -178,9 +180,8 @@ static void buffreplace (LexState *ls, char from, char to) {
 
 static void trydecpoint (LexState *ls, SemInfo *seminfo) {
   /* format error: try to update decimal point separator */
-  struct lconv *cv = localeconv();
   char old = ls->decpoint;
-  ls->decpoint = (cv ? cv->decimal_point[0] : '.');
+  ls->decpoint = '.';
   buffreplace(ls, old, ls->decpoint);  /* try updated decimal separator */
   if (!luaO_str2d(luaZ_buffer(ls->buff), &seminfo->r)) {
     /* format error with correct decimal point: no more options */
@@ -368,6 +369,7 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         else if (sep == -1) return '[';
         else luaX_lexerror(ls, "invalid long string delimiter", TK_STRING);
       }
+      fallthrough;
       case '=': {
         next(ls);
         if (ls->current != '=') return '=';

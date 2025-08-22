@@ -5,15 +5,14 @@
 */
 
 
-#include <stdarg.h>
-#include <stddef.h>
-#include <string.h>
+#include <linux/stdarg.h>
+#include <linux/string.h>
 
 
 #define ldebug_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "lapi.h"
 #include "lcode.h"
@@ -413,6 +412,7 @@ static Instruction symbexec (const Proto *pt, int lastpc, int reg) {
       case OP_FORPREP:
         checkreg(pt, a+3);
         /* go through */
+        fallthrough;
       case OP_JMP: {
         int dest = pc+1+b;
         /* not full check and jump is forward and do not skip `lastpc'? */

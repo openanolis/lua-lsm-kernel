@@ -5,14 +5,14 @@
 */
 
 
-#include <setjmp.h>
-#include <stdlib.h>
-#include <string.h>
+#include <linux/setjmp.h>
+#include <linux/panic.h>
+#include <linux/string.h>
 
 #define ldo_c
 #define LUA_CORE
 
-#include "lua.h"
+#include <linux/lua.h>
 
 #include "ldebug.h"
 #include "ldo.h"
@@ -103,7 +103,7 @@ void luaD_throw (lua_State *L, int errcode) {
       lua_unlock(L);
       G(L)->panic(L);
     }
-    exit(EXIT_FAILURE);
+    panic("Lua: unexpected error, errcode: %d\n", errcode);
   }
 }
 

@@ -8,20 +8,26 @@
 #define linit_c
 #define LUA_LIB
 
-#include "lua.h"
+#include <linux/lua.h>
 
-#include "lualib.h"
-#include "lauxlib.h"
+#include <linux/lualib.h>
+#include <linux/lauxlib.h>
 
 
 static const luaL_Reg lualibs[] = {
   {"", luaopen_base},
+#ifndef __KERNEL__
   {LUA_LOADLIBNAME, luaopen_package},
+#endif
   {LUA_TABLIBNAME, luaopen_table},
+#ifndef __KERNEL__
   {LUA_IOLIBNAME, luaopen_io},
   {LUA_OSLIBNAME, luaopen_os},
+#endif
   {LUA_STRLIBNAME, luaopen_string},
+#ifndef __KERNEL__
   {LUA_MATHLIBNAME, luaopen_math},
+#endif
   {LUA_DBLIBNAME, luaopen_debug},
   {NULL, NULL}
 };

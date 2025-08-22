@@ -5,18 +5,17 @@
 */
 
 
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <linux/stdarg.h>
+#include <linux/printk.h>
+#include <linux/string.h>
 
 #define liolib_c
 #define LUA_LIB
 
-#include "lua.h"
+#include <linux/lua.h>
 
-#include "lauxlib.h"
-#include "lualib.h"
+#include <linux/lauxlib.h>
+#include <linux/lualib.h>
 
 
 

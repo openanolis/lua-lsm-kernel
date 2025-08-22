@@ -9,11 +9,11 @@
 #define lobject_h
 
 
-#include <stdarg.h>
+#include <linux/stdarg.h>
 
 
 #include "llimits.h"
-#include "lua.h"
+#include <linux/lua.h>
 
 
 /* tags for values visible from Lua */
