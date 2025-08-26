@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+config SECURITY_LUA_LSM
+	bool "Lua based LSM Support"
+	depends on SECURITY
+	select LUA
+	default n
+	help
+	  This selects the Lua based LSM.
+	  If you are unsure how to answer this question, answer N.
+
+config SECURITY_LUA_LSM_STATS
+	bool "lua-lsm statistics"
+	depends on SECURITY_LUA_LSM
+	default n
+	help
+	  This selects the lua-lsm statistics.
+	  If you are unsure how to answer this question, answer N.
