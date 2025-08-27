@@ -526,7 +526,7 @@ int lua_module_register(const char *code, size_t len)
 	TAILQ_INIT(&module->kvnodes);
 	spin_lock_init(&module->kvnodes_lock);
 
-	write_lock(&modules_lock);
+	write_lock_bh(&modules_lock);
 	TAILQ_FOREACH(m, &lsm_modules, list) {
 		if (strcmp(module->name, m->name) == 0)
 			break;
@@ -539,7 +539,7 @@ int lua_module_register(const char *code, size_t len)
 				atomic_inc(&lua_lsm_hook_stats[i].nhooks);
 		}
 	}
-	write_unlock(&modules_lock);
+	write_unlock_bh(&modules_lock);
 
 	err = -EEXIST;
 	if (m != NULL) {
@@ -661,13 +661,13 @@ int modules_show(struct seq_file *m, void *v)
 		"name", "license", "size", "nhooks", "author");
 	seq_printf(m, "%s\n", TABLINE);
 
-	read_lock(&modules_lock);
+	read_lock_bh(&modules_lock);
 	TAILQ_FOREACH(module, &lsm_modules, list) {
 		seq_printf(m, "%-12s %-10s %6zu %6d  %-48s\n",
 			module->name, module->license, module->chunk_len,
 			module->nhooks, module->author);
 	}
-	read_unlock(&modules_lock);
+	read_unlock_bh(&modules_lock);
 	return 0;
 }
 
