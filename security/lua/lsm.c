@@ -285,7 +285,7 @@ static void *lvm_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
 			atomic_inc(&mem_nrealloc);
 		else
 			atomic_inc(&mem_nalloc);
-		return krealloc(ptr, nsize, GFP_KERNEL);
+		return krealloc(ptr, nsize, GFP_NOFS);
 	}
 }
 
