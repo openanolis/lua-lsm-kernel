@@ -113,12 +113,6 @@ static void kvcache_node_clear(struct kvcache_node *node)
 
 static void kvcache_node_free(struct kvcache_node *node)
 {
-	if (node->module) {
-		unsigned long flags;
-		spin_lock_irqsave(&node->module->kvnodes_lock, flags);
-		TAILQ_REMOVE(&node->module->kvnodes, node, modlist);
-		spin_unlock_irqrestore(&node->module->kvnodes_lock, flags);
-	}
 	kvcache_node_clear(node);
 	atomic_inc(&node_nfree);
 	kfree(node);
@@ -555,7 +549,6 @@ void kvcache_module_nodes_gc(struct lua_module *module)
 		write_unlock(&dict->lock);
 		atomic_dec(&dict->count);
 
-		TAILQ_REMOVE(&cleanup_list, node, modlist);
 		kvcache_node_free(node);
 	}
 }
@@ -566,9 +559,8 @@ void kvcache_dict_free(struct kvcache_dict *dict)
 
 	write_lock(&dict->lock);
 	RB_FOREACH_SAFE(node, kvcache, &dict->root, n) {
-		RB_REMOVE(kvcache, &dict->root, node);
+		kvcache_module_unlink(dict, node->module, node);
 		kvcache_node_free(node);
-		atomic_dec(&dict->count);
 	}
 	WARN_ON(atomic_read(&dict->count) != 0);
 	write_unlock(&dict->lock);
