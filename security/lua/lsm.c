@@ -547,7 +547,7 @@ int lua_module_register(const char *code, size_t len)
 		goto err_free_module;
 	}
 
-	__log_info("module <%s> registered with %d filters\n",
+	pr_info("module <%s> registered with %d filters\n",
 		module->name, module->nhooks);
 
 	lua_state_free(L);
@@ -638,7 +638,7 @@ int lua_module_unregister(const char *name)
 
 	write_unlock_bh(&modules_lock);
 
-	__log_info("unregistered module <%s> from %d/%d Lua VMs.\n",
+	pr_info("unregistered module <%s> from %d/%d Lua VMs.\n",
 		name, count, atomic_read(&vm_nalloc) - atomic_read(&vm_nfree));
 
 	kfree(module->chunk);
