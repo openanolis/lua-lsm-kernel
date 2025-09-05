@@ -285,7 +285,7 @@ static void *lvm_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
 			atomic_inc(&mem_nrealloc);
 		else
 			atomic_inc(&mem_nalloc);
-		return krealloc(ptr, nsize, GFP_NOFS);
+		return krealloc(ptr, nsize, GFP_ATOMIC);
 	}
 }
 
@@ -432,7 +432,7 @@ int lua_module_register(const char *code, size_t len)
 	__log_info("lua module loaded, top = %d\n", lua_gettop(L));
 
 	err = -ENOMEM;
-	module = kzalloc(sizeof(*module), GFP_KERNEL);
+	module = kzalloc(sizeof(*module), GFP_ATOMIC);
 	if (module == NULL)
 		goto err_free_lua;
 
@@ -513,7 +513,7 @@ int lua_module_register(const char *code, size_t len)
 	if (module->name == NULL)
 		goto err_free_module;
 
-	module->chunk = kmalloc(chunk_len, GFP_KERNEL);
+	module->chunk = kmalloc(chunk_len, GFP_ATOMIC);
 	if (module->chunk == NULL)
 		goto err_free_module;
 	memcpy(module->chunk, chunk, chunk_len);
