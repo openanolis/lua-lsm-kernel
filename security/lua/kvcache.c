@@ -125,10 +125,9 @@ kvcache_module_link(struct kvcache_dict *dict, struct lua_module *module,
 	RB_INSERT(kvcache, &dict->root, node);
 	atomic_inc(&dict->count);
 	if (module) {
-		unsigned long flags;
-		spin_lock_irqsave(&module->kvnodes_lock, flags);
+		spin_lock(&module->kvnodes_lock);
 		TAILQ_INSERT_TAIL(&module->kvnodes, node, modlist);
-		spin_unlock_irqrestore(&module->kvnodes_lock, flags);
+		spin_unlock(&module->kvnodes_lock);
 	}
 }
 
@@ -139,10 +138,9 @@ kvcache_module_unlink(struct kvcache_dict *dict, struct lua_module *module,
 	RB_REMOVE(kvcache, &dict->root, node);
 	atomic_dec(&dict->count);
 	if (module) {
-		unsigned long flags;
-		spin_lock_irqsave(&module->kvnodes_lock, flags);
+		spin_lock(&module->kvnodes_lock);
 		TAILQ_REMOVE(&module->kvnodes, node, modlist);
-		spin_unlock_irqrestore(&module->kvnodes_lock, flags);
+		spin_unlock(&module->kvnodes_lock);
 	}
 }
 
@@ -533,12 +531,11 @@ void kvcache_module_nodes_gc(struct lua_module *module)
 {
 	TAILQ_HEAD(, kvcache_node) cleanup_list;
 	struct kvcache_node *node, *tmp;
-	unsigned long flags;
 
 	TAILQ_INIT(&cleanup_list);
-	spin_lock_irqsave(&module->kvnodes_lock, flags);
+	spin_lock(&module->kvnodes_lock);
 	TAILQ_SWAP(&module->kvnodes, &cleanup_list, kvcache_node, modlist);
-	spin_unlock_irqrestore(&module->kvnodes_lock, flags);
+	spin_unlock(&module->kvnodes_lock);
 
 	TAILQ_FOREACH_SAFE(node, &cleanup_list, modlist, tmp) {
 		struct kvcache_dict *dict = node->dict;
