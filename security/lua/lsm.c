@@ -604,6 +604,8 @@ int lua_module_unregister(const char *name)
 		return -ENOENT;
 	}
 
+	pr_info("Prepare to unregister module <%s> ...\n", name);
+
 	for (i = 0; lua_lsm_hook_stats[i].name; i++) {
 		if (__BITMAP_ISSET(i, &module->hookfuncs))
 			atomic_dec(&lua_lsm_hook_stats[i].nhooks);
@@ -638,7 +640,7 @@ int lua_module_unregister(const char *name)
 
 	write_unlock_bh(&modules_lock);
 
-	pr_info("unregistered module <%s> from %d/%d Lua VMs.\n",
+	pr_info("Unregistered module <%s> from %d/%d Lua VMs.\n",
 		name, count, atomic_read(&vm_nalloc) - atomic_read(&vm_nfree));
 
 	kfree(module->chunk);
