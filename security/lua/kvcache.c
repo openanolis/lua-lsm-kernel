@@ -65,7 +65,7 @@ kvcache_node_alloc(struct kvcache_dict *dict, struct lua_module *module,
 	struct kvcache_node *node;
 
 	l += key ? (len + 1) : 0;
-	node = kmalloc(l, GFP_NOFS);
+	node = kmalloc(l, GFP_ATOMIC);
 	if (node == NULL)
 		return NULL;
 
@@ -191,7 +191,7 @@ static int kvcache_node_fill(lua_State *L, int idx, struct kvcache_node *node)
 
 	case LUA_TSTRING:
 		s = lua_tolstring(L, idx, &node->s.l);
-		node->s.s = kmalloc(node->s.l + 1, GFP_NOFS);
+		node->s.s = kmalloc(node->s.l + 1, GFP_ATOMIC);
 		if (node->s.s == NULL)
 			return -ENOMEM;
 		memcpy((void *)node->s.s, s, node->s.l + 1/* ending 0 */);
