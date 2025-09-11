@@ -41,6 +41,9 @@ __setup("lua.nodebug", disable_debug);
 
 #endif	/* ! DEBUG */
 
+/* Flag indicating whether initialization completed */
+int lua_lsm_initialized __initdata;
+
 /********************************* lsm hook *********************************/
 
 struct lua_modules_head lsm_modules = TAILQ_HEAD_INITIALIZER(lsm_modules);
@@ -825,6 +828,10 @@ static int __init lua_lsm_init(void)
 		return err;
 
 	security_add_hooks(lua_lsm_hooks, ARRAY_SIZE(lua_lsm_hooks), &lua_lsmid);
+
+	/* Report that Lua-LSM successfully initialized */
+	lua_lsm_initialized = 1;
+
 	pr_info("Lua based LSM initialized\n");
 	return 0;
 }

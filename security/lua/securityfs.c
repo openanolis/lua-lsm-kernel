@@ -185,6 +185,9 @@ static int __init lua_securityfs_init(void)
 	struct dentry *dentry;
 	struct lua_file *file;
 
+	if (!lua_lsm_initialized)
+		return 0;
+
 	dir = securityfs_create_dir("lua", NULL);
 	if (IS_ERR(dir))
 		return PTR_ERR(dir);

@@ -20,6 +20,8 @@
 #include "queue.h"
 #include "kvcache.h"
 
+/* Flag indicating whether initialization completed */
+extern int lua_lsm_initialized __initdata;
 
 #define LUA_LSM_VERSION		1
 
