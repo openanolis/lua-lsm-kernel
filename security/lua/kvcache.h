@@ -10,6 +10,7 @@
 
 #include <linux/rwlock.h>
 #include <linux/lua.h>
+#include "refcount.h"
 #undef LIST_HEAD
 #include "queue.h"
 #undef RB_ROOT
@@ -23,6 +24,8 @@ struct kvcache_node {
 	const char *key;
 	struct lua_module *module;
 	struct kvcache_dict *dict;
+	atomic_t refcount;
+	rwlock_t lock;
 	int tt;
 	union {
 		int b;

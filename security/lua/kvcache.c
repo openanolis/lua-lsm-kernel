@@ -41,20 +41,11 @@ static int kvcache_result(lua_State *L, int err, int nresults)
 	case -EINVAL:	error = "invalid value";	break;
 	case -ERANGE:	error = "no space";		break;
 	case -ENOENT:	error = "no module";		break;
+	case -EEXIST:	error = "exists";		break;
 	}
 	lua_pushnil(L);
 	lua_pushstring(L, error);
 	return 2;
-}
-
-static struct kvcache_node *
-kvcache_lookup(struct kvcache_dict *dict,
-	struct lua_module *module, const char *key)
-{
-	struct kvcache_node tmp;
-	tmp.key = key;
-	tmp.module = module;
-	return RB_FIND(kvcache, &dict->root, &tmp);
 }
 
 static struct kvcache_node *
@@ -79,6 +70,8 @@ kvcache_node_alloc(struct kvcache_dict *dict, struct lua_module *module,
 	node->tt = LUA_TNIL;
 	node->module = module;
 	node->dict = dict;
+	refcount_init(&node->refcount, 1);
+	rwlock_init(&node->lock);
 	atomic_inc(&node_nalloc);
 	return node;
 }
@@ -109,22 +102,67 @@ static void kvcache_node_free(struct kvcache_node *node)
 	kfree(node);
 }
 
-static void
-kvcache_module_link(struct kvcache_dict *dict, struct lua_module *module,
-		struct kvcache_node *node)
+static void kvcache_node_hold(struct kvcache_node *node)
 {
-	RB_INSERT(kvcache, &dict->root, node);
-	atomic_inc(&dict->count);
-	if (module) {
-		spin_lock(&module->kvnodes_lock);
-		TAILQ_INSERT_TAIL(&module->kvnodes, node, modlist);
-		spin_unlock(&module->kvnodes_lock);
+	if (node)
+		refcount_acquire(&node->refcount);
+}
+
+static void kvcache_node_drop(struct kvcache_node *node)
+{
+	if (node == NULL)
+		return;
+	if (refcount_release(&node->refcount))
+		kvcache_node_free(node);
+}
+
+static struct kvcache_node *
+kvcache_lookup(struct kvcache_dict *dict,
+	struct lua_module *module, const char *key)
+{
+	struct kvcache_node tmp, *node;
+	tmp.key = key;
+	tmp.module = module;
+	read_lock(&dict->lock);
+	node = RB_FIND(kvcache, &dict->root, &tmp);
+	kvcache_node_hold(node);
+	read_unlock(&dict->lock);
+	return node;
+}
+
+static struct kvcache_node *
+kvcache_module_link(struct kvcache_dict *dict,
+		struct lua_module *module, struct kvcache_node *node)
+{
+	struct kvcache_node *prev;
+
+	write_lock(&dict->lock);
+
+	if (atomic_read(&dict->count) >= dict->capacity) {
+		prev = ERR_PTR(-ERANGE);
+		goto unlock;
 	}
+
+	prev = RB_INSERT(kvcache, &dict->root, node);
+	if (prev) {
+		kvcache_node_hold(prev);
+	} else {
+		atomic_inc(&dict->count);
+		if (module) {
+			spin_lock(&module->kvnodes_lock);
+			TAILQ_INSERT_TAIL(&module->kvnodes, node, modlist);
+			spin_unlock(&module->kvnodes_lock);
+		}
+	}
+
+unlock:
+	write_unlock(&dict->lock);
+	return prev;
 }
 
 static void
-kvcache_module_unlink(struct kvcache_dict *dict, struct lua_module *module,
-		struct kvcache_node *node)
+kvcache_module_unlink_unlocked(struct kvcache_dict *dict,
+		struct lua_module *module, struct kvcache_node *node)
 {
 	RB_REMOVE(kvcache, &dict->root, node);
 	atomic_dec(&dict->count);
@@ -133,6 +171,15 @@ kvcache_module_unlink(struct kvcache_dict *dict, struct lua_module *module,
 		TAILQ_REMOVE(&module->kvnodes, node, modlist);
 		spin_unlock(&module->kvnodes_lock);
 	}
+}
+
+static void
+kvcache_module_unlink(struct kvcache_dict *dict,
+		struct lua_module *module, struct kvcache_node *node)
+{
+	write_lock(&dict->lock);
+	kvcache_module_unlink_unlocked(dict, module, node);
+	write_unlock(&dict->lock);
 }
 
 static int kvcache_node_fill(lua_State *L, int idx, struct kvcache_node *node)
@@ -167,6 +214,27 @@ static int kvcache_node_fill(lua_State *L, int idx, struct kvcache_node *node)
 	return 0;
 }
 
+static void
+kvcache_node_copy(struct kvcache_node *node, struct kvcache_node *src)
+{
+	node->tt = src->tt;
+	switch (src->tt) {
+	case LUA_TBOOLEAN:
+		node->b = src->b;
+		break;
+	case LUA_TNUMBER:
+		node->n = src->n;
+		break;
+	case LUA_TLIGHTUSERDATA:
+		node->p = src->p;
+		break;
+	case LUA_TSTRING:
+		node->s.s = src->s.s;
+		node->s.l = src->s.l;
+		break;
+	}
+}
+
 static int kvcache_node_refill(lua_State *L, int idx, struct kvcache_node *node)
 {
 	struct kvcache_node ntmp;
@@ -176,24 +244,11 @@ static int kvcache_node_refill(lua_State *L, int idx, struct kvcache_node *node)
 	if (err)
 		return err;
 
+	write_lock(&node->lock);
 	kvcache_node_clear(node);
+	kvcache_node_copy(node, &ntmp);
+	write_unlock(&node->lock);
 
-	node->tt = ntmp.tt;
-	switch (node->tt) {
-	case LUA_TBOOLEAN:
-		node->b = ntmp.b;
-		break;
-	case LUA_TNUMBER:
-		node->n = ntmp.n;
-		break;
-	case LUA_TLIGHTUSERDATA:
-		node->p = ntmp.p;
-		break;
-	case LUA_TSTRING:
-		node->s.s = ntmp.s.s;
-		node->s.l = ntmp.s.l;
-		break;
-	}
 	return 0;
 }
 
@@ -203,44 +258,50 @@ kvcache_set(lua_State *L, struct kvcache_dict *dict, struct lua_module *module)
 	size_t len;
 	const char *key = luaL_checklstring(L, 2, &len);
 	int tt = lua_type(L, 3);
-	struct kvcache_node *node;
+	struct kvcache_node *node, *prev;
 	int err = 0;
 
-	write_lock(&dict->lock);
 	node = kvcache_lookup(dict, module, key);
 	if (node) {
 		if (tt == LUA_TNIL) {
 			kvcache_module_unlink(dict, module, node);
-			kvcache_node_free(node);
+			kvcache_node_drop(node);
 		} else {
 			err = kvcache_node_refill(L, 3, node);
 		}
-		goto unlock;
+		kvcache_node_drop(node);
+		goto ret;
 	}
 
 	if (tt == LUA_TNIL)
-		goto unlock;
-
-	err = -ERANGE;
-	if (atomic_read(&dict->count) >= dict->capacity)
-		goto unlock;
+		goto ret;
 
 	err = -ENOMEM;
 	node = kvcache_node_alloc(dict, module, key, len);
 	if (node == NULL)
-		goto unlock;
+		goto ret;
 
 	err = kvcache_node_fill(L, 3, node);
 	if (err) {
 		kvcache_node_free(node);
-		goto unlock;
+		goto ret;
 	}
 
-	kvcache_module_link(dict, module, node);
+	err = -EEXIST;
+	prev = kvcache_module_link(dict, module, node);
+	if (prev) {
+		if (IS_ERR(prev))
+			err = PTR_ERR(prev);
+		else
+			kvcache_node_drop(prev);
 
-unlock:
-	write_unlock(&dict->lock);
+		kvcache_node_free(node);
+		goto ret;
+	}
 
+	err = 0;
+
+ret:
 	if (!err)
 		lua_pushboolean(L, 1);
 
@@ -249,18 +310,24 @@ unlock:
 
 static int kvcache_node_get(lua_State *L, struct kvcache_node *node)
 {
-	switch (node->tt) {
+	struct kvcache_node ntmp;
+
+	read_lock(&node->lock);
+	kvcache_node_copy(&ntmp, node);
+	read_unlock(&node->lock);
+
+	switch (ntmp.tt) {
 	case LUA_TBOOLEAN:
-		lua_pushboolean(L, node->b);
+		lua_pushboolean(L, ntmp.b);
 		break;
 	case LUA_TNUMBER:
-		lua_pushnumber(L, node->n);
+		lua_pushnumber(L, ntmp.n);
 		break;
 	case LUA_TLIGHTUSERDATA:
-		lua_pushlightuserdata(L, node->p);
+		lua_pushlightuserdata(L, ntmp.p);
 		break;
 	case LUA_TSTRING:
-		lua_pushlstring(L, node->s.s, node->s.l);
+		lua_pushlstring(L, ntmp.s.s, ntmp.s.l);
 		break;
 	default:
 		WARN_ON(1);
@@ -275,13 +342,13 @@ kvcache_get(lua_State *L, struct kvcache_dict *dict, struct lua_module *module)
 	const char *key = luaL_checkstring(L, 2);
 	struct kvcache_node *node;
 
-	read_lock(&dict->lock);
 	node = kvcache_lookup(dict, module, key);
-	if (node)
+	if (node) {
 		kvcache_node_get(L, node);
-	else
+		kvcache_node_drop(node);
+	} else {
 		lua_pushnil(L);
-	read_unlock(&dict->lock);
+	}
 	return 1;
 }
 
@@ -291,38 +358,48 @@ kvcache_incr(lua_State *L, struct kvcache_dict *dict, struct lua_module *module)
 	size_t len;
 	const char *key = luaL_checklstring(L, 2, &len);
 	lua_Number n = luaL_optnumber(L, 3, 1);
-	struct kvcache_node *node;
+	struct kvcache_node *node, *prev;
 	int err = 0;
 
-	write_lock(&dict->lock);
 	node = kvcache_lookup(dict, module, key);
 	if (node) {
+		write_lock(&node->lock);
 		if (node->tt == LUA_TNUMBER) {
 			node->n += n;
-			lua_pushnumber(L, node->n);
+			n = node->n;
 		} else {
 			err = -EINVAL;
 		}
-		goto unlock;
+		write_unlock(&node->lock);
+		kvcache_node_drop(node);
+		goto ret;
 	}
-
-	err = -ERANGE;
-	if (atomic_read(&dict->count) >= dict->capacity)
-		goto unlock;
 
 	err = -ENOMEM;
 	node = kvcache_node_alloc(dict, module, key, len);
 	if (node == NULL)
-		goto unlock;
+		goto ret;
 
 	node->n = n;
 	node->tt = LUA_TNUMBER;
-	kvcache_module_link(dict, module, node);
-	lua_pushnumber(L, node->n);
+
+	err = -EEXIST;
+	prev = kvcache_module_link(dict, module, node);
+	if (prev) {
+		if (IS_ERR(prev))
+			err = PTR_ERR(prev);
+		else
+			kvcache_node_drop(prev);
+
+		kvcache_node_free(node);
+		goto ret;
+	}
+
 	err = 0;
 
-unlock:
-	write_unlock(&dict->lock);
+ret:
+	if (!err)
+		lua_pushnumber(L, n);
 
 	return kvcache_result(L, err, 1);
 }
@@ -340,13 +417,13 @@ void kvcache_module_nodes_gc(struct lua_module *module)
 	TAILQ_FOREACH_SAFE(node, &cleanup_list, modlist, tmp) {
 		struct kvcache_dict *dict = node->dict;
 
-		WARN_ON(!dict);
-		write_lock(&dict->lock);
-		RB_REMOVE(kvcache, &dict->root, node);
-		write_unlock(&dict->lock);
-		atomic_dec(&dict->count);
-
-		kvcache_node_free(node);
+		BUG_ON(!dict);
+		/*
+		 * module is set to NULL, so there is no need to remove
+		 * node from the module kvnodes queue.
+		 */
+		kvcache_module_unlink(dict, NULL, node);
+		kvcache_node_drop(node);
 	}
 }
 
@@ -356,8 +433,8 @@ void kvcache_dict_free(struct kvcache_dict *dict)
 
 	write_lock(&dict->lock);
 	RB_FOREACH_SAFE(node, kvcache, &dict->root, n) {
-		kvcache_module_unlink(dict, node->module, node);
-		kvcache_node_free(node);
+		kvcache_module_unlink_unlocked(dict, node->module, node);
+		kvcache_node_drop(node);
 	}
 	WARN_ON(atomic_read(&dict->count) != 0);
 	write_unlock(&dict->lock);
