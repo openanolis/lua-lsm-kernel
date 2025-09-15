@@ -90,7 +90,6 @@ static int kvcache_node_fill(lua_State *L, int idx, struct kvcache_node *node);
 
 static void kvcache_node_clear(struct kvcache_node *node)
 {
-	struct kvcache_node *n, *tmp;
 	switch (node->tt) {
 	case LUA_TBOOLEAN:
 	case LUA_TNUMBER:
@@ -98,14 +97,6 @@ static void kvcache_node_clear(struct kvcache_node *node)
 		break;
 	case LUA_TSTRING:
 		kfree(node->s.s);
-		break;
-	case LUA_TTABLE:
-		TAILQ_FOREACH_SAFE(n, &node->q.h, qlist, tmp) {
-			TAILQ_REMOVE(&node->q.h, n, qlist);
-			node->q.l -= 1;
-			kvcache_node_free(n);
-		}
-		WARN_ON(node->q.l != 0);
 		break;
 	}
 	node->tt = LUA_TNIL;
@@ -144,36 +135,9 @@ kvcache_module_unlink(struct kvcache_dict *dict, struct lua_module *module,
 	}
 }
 
-static int
-kvcache_qnode_new(lua_State *L, int idx, struct kvcache_node *head, int left)
-{
-	struct kvcache_node *node;
-	int err;
-
-	node = kvcache_value_alloc();
-	if (node == NULL)
-		return -ENOMEM;
-
-	err = kvcache_node_fill(L, idx, node);
-	if (err) {
-		kvcache_node_free(node);
-		return err;
-	}
-
-	if (left)
-		TAILQ_INSERT_HEAD(&head->q.h, node, qlist);
-	else
-		TAILQ_INSERT_TAIL(&head->q.h, node, qlist);
-
-	head->q.l += 1;
-	return 0;
-}
-
 static int kvcache_node_fill(lua_State *L, int idx, struct kvcache_node *node)
 {
 	const char *s;
-	int tidx;
-	int err = 0;
 
 	node->tt = lua_type(L, idx);
 	switch (node->tt) {
@@ -195,28 +159,6 @@ static int kvcache_node_fill(lua_State *L, int idx, struct kvcache_node *node)
 		if (node->s.s == NULL)
 			return -ENOMEM;
 		memcpy((void *)node->s.s, s, node->s.l + 1/* ending 0 */);
-		break;
-
-	case LUA_TTABLE:
-		TAILQ_INIT(&node->q.h);
-		node->q.l = 0;
-		tidx = idx > 0 ? idx : idx - 1;
-		lua_pushnil(L);
-		while (lua_next(L, tidx) != 0) {
-			/* uses 'key' (at index -2) and 'value' (at index -1) */
-			err = kvcache_qnode_new(L, -1, node, 0);
-			if (err)
-				break;
-
-			/* removes 'value'; keeps 'key' for next iteration */
-			lua_pop(L, 1);
-		}
-		if (err) {
-			kvcache_node_clear(node);
-			/* removes 'key' and 'value' */
-			lua_pop(L, 2);
-			return err;
-		}
 		break;
 
 	default:
@@ -250,11 +192,6 @@ static int kvcache_node_refill(lua_State *L, int idx, struct kvcache_node *node)
 	case LUA_TSTRING:
 		node->s.s = ntmp.s.s;
 		node->s.l = ntmp.s.l;
-		break;
-	case LUA_TTABLE:
-		TAILQ_INIT(&node->q.h);
-		TAILQ_SWAP(&node->q.h, &ntmp.q.h, kvcache_node, qlist);
-		node->q.l = ntmp.q.l;
 		break;
 	}
 	return 0;
@@ -312,9 +249,6 @@ unlock:
 
 static int kvcache_node_get(lua_State *L, struct kvcache_node *node)
 {
-	struct kvcache_node *n;
-	int idx = 1;
-
 	switch (node->tt) {
 	case LUA_TBOOLEAN:
 		lua_pushboolean(L, node->b);
@@ -327,13 +261,6 @@ static int kvcache_node_get(lua_State *L, struct kvcache_node *node)
 		break;
 	case LUA_TSTRING:
 		lua_pushlstring(L, node->s.s, node->s.l);
-		break;
-	case LUA_TTABLE:
-		lua_createtable(L, node->q.l, 0);
-		TAILQ_FOREACH(n, &node->q.h, qlist) {
-			kvcache_node_get(L, n);
-			lua_rawseti(L, -2, idx++);
-		}
 		break;
 	default:
 		WARN_ON(1);
@@ -397,133 +324,6 @@ kvcache_incr(lua_State *L, struct kvcache_dict *dict, struct lua_module *module)
 unlock:
 	write_unlock(&dict->lock);
 
-	return kvcache_result(L, err, 1);
-}
-
-static int
-kvcache_qnode_append(lua_State *L, int from, struct kvcache_node *head, int left)
-{
-	int top = lua_gettop(L);
-	int nres = 0;
-	int err;
-
-	for ( ; from <= top; from++) {
-		err = kvcache_qnode_new(L, from, head, left);
-		if (err) {
-			__log_err("qnode_new: from = %d, err = %d\n", from, err);
-			break;
-		}
-		nres += 1;
-	}
-	return nres;
-}
-
-static int kvcache_push(lua_State *L, struct kvcache_dict *dict,
-			struct lua_module *module, int left)
-{
-	size_t len;
-	const char *key = luaL_checklstring(L, 2, &len);
-	struct kvcache_node *node;
-	int nres;
-	int err = 0;
-
-	write_lock(&dict->lock);
-	node = kvcache_lookup(dict, module, key);
-	if (node) {
-		if (node->tt == LUA_TTABLE) {
-			nres = kvcache_qnode_append(L, 3, node, left);
-			lua_pushinteger(L, nres);
-		} else {
-			err = -EINVAL;
-		}
-		goto unlock;
-	}
-
-	err = -ERANGE;
-	if (atomic_read(&dict->count) >= dict->capacity)
-		goto unlock;
-
-	err = -ENOMEM;
-	node = kvcache_node_alloc(dict, module, key, len);
-	if (node == NULL)
-		goto unlock;
-
-	node->tt = LUA_TTABLE;
-	node->q.l = 0;
-	TAILQ_INIT(&node->q.h);
-	nres = kvcache_qnode_append(L, 3, node, left);
-
-	kvcache_module_link(dict, module, node);
-
-	lua_pushinteger(L, nres);
-	err = 0;
-
-unlock:
-	write_unlock(&dict->lock);
-
-	return kvcache_result(L, err, 1);
-}
-
-static int
-kvcache_qnode_pop(lua_State *L, int npop, struct kvcache_node *head, int left)
-{
-	struct kvcache_node *node;
-	int nres = 0;
-
-	while (head->q.l > 0 && npop-- > 0) {
-		WARN_ON(TAILQ_EMPTY(&head->q.h));
-
-		if (left)
-			node = TAILQ_FIRST(&head->q.h);
-		else
-			node = TAILQ_LAST_FAST(&head->q.h, kvcache_node, qlist);
-
-		TAILQ_REMOVE(&head->q.h, node, qlist);
-		head->q.l -= 1;
-		kvcache_node_get(L, node);
-		kvcache_node_free(node);
-		nres += 1;
-	}
-	return nres;
-}
-
-static int kvcache_pop(lua_State *L, struct kvcache_dict *dict,
-			struct lua_module *module, int left)
-{
-	const char *key = luaL_checkstring(L, 2);
-	int npop = luaL_optint(L, 3, 1);
-	struct kvcache_node *node;
-	int nres = 0;
-	int err = 0;
-
-	write_lock(&dict->lock);
-	node = kvcache_lookup(dict, module, key);
-	if (node) {
-		if (node->tt == LUA_TTABLE)
-			nres = kvcache_qnode_pop(L, npop, node, left);
-		else
-			err = -EINVAL;
-	}
-	write_unlock(&dict->lock);
-	return kvcache_result(L, err, nres);
-}
-
-static int kvcache_llen(lua_State *L, struct kvcache_dict *dict,
-			struct lua_module *module)
-{
-	const char *key = luaL_checkstring(L, 2);
-	struct kvcache_node *node;
-	int err = 0;
-
-	read_lock(&dict->lock);
-	node = kvcache_lookup(dict, module, key);
-	if (node) {
-		if (node->tt == LUA_TTABLE)
-			lua_pushinteger(L, node->q.l);
-		else
-			err = -EINVAL;
-	}
-	read_unlock(&dict->lock);
 	return kvcache_result(L, err, 1);
 }
 
@@ -631,61 +431,6 @@ int lua_object_incr(lua_State *L, struct kvcache_dict *dict)
 	return kvcache_incr(L, dict, module);
 }
 
-int lua_object_lpush(lua_State *L, struct kvcache_dict *dict)
-{
-	struct lua_module *module;
-
-	module = module_from_object_fenv(L, 1);
-	if (module == NULL)
-		return kvcache_result(L, -ENOENT, 0);
-
-	return kvcache_push(L, dict, module, 1);
-}
-
-int lua_object_rpush(lua_State *L, struct kvcache_dict *dict)
-{
-	struct lua_module *module;
-
-	module = module_from_object_fenv(L, 1);
-	if (module == NULL)
-		return kvcache_result(L, -ENOENT, 0);
-
-	return kvcache_push(L, dict, module, 0);
-}
-
-int lua_object_lpop(lua_State *L, struct kvcache_dict *dict)
-{
-	struct lua_module *module;
-
-	module = module_from_object_fenv(L, 1);
-	if (module == NULL)
-		return kvcache_result(L, -ENOENT, 0);
-
-	return kvcache_pop(L, dict, module, 1);
-}
-
-int lua_object_rpop(lua_State *L, struct kvcache_dict *dict)
-{
-	struct lua_module *module;
-
-	module = module_from_object_fenv(L, 1);
-	if (module == NULL)
-		return kvcache_result(L, -ENOENT, 0);
-
-	return kvcache_pop(L, dict, module, 0);
-}
-
-int lua_object_llen(lua_State *L, struct kvcache_dict *dict)
-{
-	struct lua_module *module;
-
-	module = module_from_object_fenv(L, 1);
-	if (module == NULL)
-		return kvcache_result(L, -ENOENT, 0);
-
-	return kvcache_llen(L, dict, module);
-}
-
 /*
  *	__index = function(object, key)
  *		local mt = getmetatable(object)
@@ -750,36 +495,6 @@ static int shdict_incr(lua_State *L)
 	return kvcache_incr(L, shdict, NULL);
 }
 
-static int shdict_lpush(lua_State *L)
-{
-	struct kvcache_dict *shdict = toshdict(L, 1);
-	return kvcache_push(L, shdict, NULL, 1);
-}
-
-static int shdict_rpush(lua_State *L)
-{
-	struct kvcache_dict *shdict = toshdict(L, 1);
-	return kvcache_push(L, shdict, NULL, 0);
-}
-
-static int shdict_lpop(lua_State *L)
-{
-	struct kvcache_dict *shdict = toshdict(L, 1);
-	return kvcache_pop(L, shdict, NULL, 1);
-}
-
-static int shdict_rpop(lua_State *L)
-{
-	struct kvcache_dict *shdict = toshdict(L, 1);
-	return kvcache_pop(L, shdict, NULL, 0);
-}
-
-static int shdict_llen(lua_State *L)
-{
-	struct kvcache_dict *shdict = toshdict(L, 1);
-	return kvcache_llen(L, shdict, NULL);
-}
-
 static int shdict_index(lua_State *L)
 {
 	struct kvcache_dict *shdict = toshdict(L, 1);
@@ -817,11 +532,6 @@ static const luaL_Reg shdict_meth[] = {
 	{ "set",	shdict_set	},
 	{ "get",	shdict_get	},
 	{ "incr",	shdict_incr	},
-	{ "lpush",	shdict_lpush	},
-	{ "rpush",	shdict_rpush	},
-	{ "lpop",	shdict_lpop	},
-	{ "rpop",	shdict_rpop	},
-	{ "llen",	shdict_llen	},
 	{ "__index",	shdict_index	},
 	{ "__newindex",	shdict_set	},
 	{ "__tostring",	shdict_tostring	},

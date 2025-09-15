@@ -65,11 +65,6 @@ extern const int _module_sentinel;
 
 int lua_object_get(lua_State *L, struct kvcache_dict *dict);
 int lua_object_incr(lua_State *L, struct kvcache_dict *dict);
-int lua_object_lpush(lua_State *L, struct kvcache_dict *dict);
-int lua_object_rpush(lua_State *L, struct kvcache_dict *dict);
-int lua_object_lpop(lua_State *L, struct kvcache_dict *dict);
-int lua_object_rpop(lua_State *L, struct kvcache_dict *dict);
-int lua_object_llen(lua_State *L, struct kvcache_dict *dict);
 int lua_object_index(lua_State *L, struct kvcache_dict *dict);
 int lua_object_newindex(lua_State *L, struct kvcache_dict *dict);
 

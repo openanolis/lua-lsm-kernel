@@ -52,11 +52,6 @@
 	LUA_OBJECT_DEFINE(class, name, ctype, d)						\
 	LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, kvcache_get, get)			\
 	LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, kvcache_incr, incr)			\
-	LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, kvcache_lpush, lpush)			\
-	LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, kvcache_rpush, rpush)			\
-	LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, kvcache_lpop, lpop)			\
-	LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, kvcache_rpop, rpop)			\
-	LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, kvcache_llen, llen)			\
 	LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, index, index)				\
 	LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, newindex, newindex)			\
 	static inline void create_ ## name ## _meta(lua_State *L,				\
@@ -66,11 +61,6 @@
 			{ "kvcache_set",	class ## _ ## name ## _newindex		},	\
 			{ "kvcache_get",	class ## _ ## name ## _kvcache_get	},	\
 			{ "kvcache_incr",	class ## _ ## name ## _kvcache_incr	},	\
-			{ "kvcache_lpush",	class ## _ ## name ## _kvcache_lpush	},	\
-			{ "kvcache_rpush",	class ## _ ## name ## _kvcache_rpush	},	\
-			{ "kvcache_lpop",	class ## _ ## name ## _kvcache_lpop	},	\
-			{ "kvcache_rpop",	class ## _ ## name ## _kvcache_rpop	},	\
-			{ "kvcache_llen",	class ## _ ## name ## _kvcache_llen	},	\
 			{ "__index",		class ## _ ## name ## _index		},	\
 			{ "__newindex",		class ## _ ## name ## _newindex		},	\
 			{ "__tostring",		class ## _ ## name ## _tostring		},	\
