@@ -31,22 +31,9 @@ struct kvcache_node {
 		int b;
 		lua_Number n;
 		void *p;
-		struct {
-			const char *s;
-			size_t l;
-		} s;
-		struct {
-			TAILQ_HEAD(, kvcache_node) h;
-			size_t l;
-		} q;
 	};
-	union {
-		struct {
-			RB_ENTRY(kvcache_node) node;
-			TAILQ_ENTRY(kvcache_node) modlist;
-		};
-		TAILQ_ENTRY(kvcache_node) qlist;
-	};
+	RB_ENTRY(kvcache_node) node;
+	TAILQ_ENTRY(kvcache_node) modlist;
 };
 
 struct kvcache_dict {

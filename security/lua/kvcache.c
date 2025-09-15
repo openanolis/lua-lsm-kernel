@@ -40,7 +40,7 @@ static int kvcache_result(lua_State *L, int err, int nresults)
 	case -ENOMEM:	error = "no memory";		break;
 	case -EINVAL:	error = "invalid value";	break;
 	case -ERANGE:	error = "no space";		break;
-	case -ENOENT:	error = "no module";		break;
+	case -ESRCH:	error = "no module";		break;
 	case -EEXIST:	error = "exists";		break;
 	}
 	lua_pushnil(L);
@@ -55,8 +55,9 @@ kvcache_node_alloc(struct kvcache_dict *dict, struct lua_module *module,
 	size_t l = sizeof(struct kvcache_node);
 	struct kvcache_node *node;
 
+	WARN_ON(in_atomic());
 	l += key ? (len + 1) : 0;
-	node = kmalloc(l, GFP_ATOMIC);
+	node = kmalloc(l, GFP_NOFS);
 	if (node == NULL)
 		return NULL;
 
@@ -76,20 +77,12 @@ kvcache_node_alloc(struct kvcache_dict *dict, struct lua_module *module,
 	return node;
 }
 
-#define kvcache_value_alloc()	kvcache_node_alloc(NULL, NULL, NULL, 0)
-
-static void kvcache_node_free(struct kvcache_node *node);
-static int kvcache_node_fill(lua_State *L, int idx, struct kvcache_node *node);
-
 static void kvcache_node_clear(struct kvcache_node *node)
 {
 	switch (node->tt) {
 	case LUA_TBOOLEAN:
 	case LUA_TNUMBER:
 	case LUA_TLIGHTUSERDATA:
-		break;
-	case LUA_TSTRING:
-		kfree(node->s.s);
 		break;
 	}
 	node->tt = LUA_TNIL;
@@ -184,8 +177,6 @@ kvcache_module_unlink(struct kvcache_dict *dict,
 
 static int kvcache_node_fill(lua_State *L, int idx, struct kvcache_node *node)
 {
-	const char *s;
-
 	node->tt = lua_type(L, idx);
 	switch (node->tt) {
 	case LUA_TBOOLEAN:
@@ -198,14 +189,6 @@ static int kvcache_node_fill(lua_State *L, int idx, struct kvcache_node *node)
 
 	case LUA_TLIGHTUSERDATA:
 		node->p = lua_touserdata(L, idx);
-		break;
-
-	case LUA_TSTRING:
-		s = lua_tolstring(L, idx, &node->s.l);
-		node->s.s = kmalloc(node->s.l + 1, GFP_ATOMIC);
-		if (node->s.s == NULL)
-			return -ENOMEM;
-		memcpy((void *)node->s.s, s, node->s.l + 1/* ending 0 */);
 		break;
 
 	default:
@@ -227,10 +210,6 @@ kvcache_node_copy(struct kvcache_node *node, struct kvcache_node *src)
 		break;
 	case LUA_TLIGHTUSERDATA:
 		node->p = src->p;
-		break;
-	case LUA_TSTRING:
-		node->s.s = src->s.s;
-		node->s.l = src->s.l;
 		break;
 	}
 }
@@ -325,9 +304,6 @@ static int kvcache_node_get(lua_State *L, struct kvcache_node *node)
 		break;
 	case LUA_TLIGHTUSERDATA:
 		lua_pushlightuserdata(L, ntmp.p);
-		break;
-	case LUA_TSTRING:
-		lua_pushlstring(L, ntmp.s.s, ntmp.s.l);
 		break;
 	default:
 		WARN_ON(1);
@@ -503,7 +479,7 @@ int lua_object_incr(lua_State *L, struct kvcache_dict *dict)
 
 	module = module_from_object_fenv(L, 1);
 	if (module == NULL)
-		return kvcache_result(L, -ENOENT, 0);
+		return kvcache_result(L, -ESRCH, 0);
 
 	return kvcache_incr(L, dict, module);
 }
@@ -548,7 +524,7 @@ int lua_object_newindex(lua_State *L, struct kvcache_dict *dict)
 
 	module = module_from_object_fenv(L, 1);
 	if (module == NULL)
-		return kvcache_result(L, -ENOENT, 0);
+		return kvcache_result(L, -ESRCH, 0);
 	return kvcache_set(L, dict, module);
 }
 
