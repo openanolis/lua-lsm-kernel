@@ -46,7 +46,7 @@ int lua_lsm_initialized __initdata;
 
 /********************************* lsm hook *********************************/
 
-struct lua_modules_head lsm_modules = TAILQ_HEAD_INITIALIZER(lsm_modules);
+struct list_head lsm_modules = LIST_HEAD_INIT(lsm_modules);
 DEFINE_RWLOCK(modules_lock);
 
 struct lua_lsm_hook_stat lua_lsm_hook_stats[] = {
@@ -91,7 +91,7 @@ static int lua_shared_index(lua_State *L)
 	module = lua_touserdata(L, -1);
 
 	write_lock(&module->shdict_lock);
-	TAILQ_FOREACH(shdict, &module->shdict, list) {
+	list_for_each_entry(shdict, &module->shdicts, list) {
 		if (strcmp(shdict->name, name) == 0)
 			break;
 	}
@@ -104,7 +104,7 @@ static int lua_shared_index(lua_State *L)
 			goto err_free;
 		kvcache_dict_init(&shdict->dict);
 		atomic_inc(&module->shdict_count);
-		TAILQ_INSERT_TAIL(&module->shdict, shdict, list);
+		list_add_tail(&shdict->list, &module->shdicts);
 	}
 	write_unlock(&module->shdict_lock);
 
@@ -215,7 +215,7 @@ static int lua_module_index(lua_State *L)
 	int err;
 
 	/* module queries are always run with a read lock */
-	TAILQ_FOREACH(module, &lsm_modules, list) {
+	list_for_each_entry(module, &lsm_modules, list) {
 		if (strcmp(module->name, key) != 0)
 			continue;
 
@@ -522,20 +522,20 @@ int lua_module_register(const char *code, size_t len)
 	memcpy(module->chunk, chunk, chunk_len);
 	module->chunk_len = chunk_len;
 
-	TAILQ_INIT(&module->shdict);
+	INIT_LIST_HEAD(&module->shdicts);
 	rwlock_init(&module->shdict_lock);
 	atomic_set(&module->shdict_count, 0);
 
-	TAILQ_INIT(&module->kvnodes);
+	INIT_LIST_HEAD(&module->kvnodes);
 	spin_lock_init(&module->kvnodes_lock);
 
 	write_lock_bh(&modules_lock);
-	TAILQ_FOREACH(m, &lsm_modules, list) {
+	list_for_each_entry(m, &lsm_modules, list) {
 		if (strcmp(module->name, m->name) == 0)
 			break;
 	}
 	if (m == NULL) {
-		TAILQ_INSERT_TAIL(&lsm_modules, module, list);
+		list_add_tail(&module->list, &lsm_modules);
 
 		for (i = 0; lua_lsm_hook_stats[i].name; i++) {
 			if (__BITMAP_ISSET(i, &module->hookfuncs))
@@ -595,9 +595,9 @@ int lua_module_unregister(const char *name)
 	int i;
 
 	write_lock_bh(&modules_lock);
-	TAILQ_FOREACH_SAFE(module, &lsm_modules, list, tmp) {
+	list_for_each_entry_safe(module, tmp, &lsm_modules, list) {
 		if (strcmp(module->name, name) == 0) {
-			TAILQ_REMOVE(&lsm_modules, module, list);
+			list_del(&module->list);
 			break;
 		}
 	}
@@ -614,8 +614,8 @@ int lua_module_unregister(const char *name)
 			atomic_dec(&lua_lsm_hook_stats[i].nhooks);
 	}
 
-	TAILQ_FOREACH_SAFE(shdict, &module->shdict, list, shdict_tmp) {
-		TAILQ_REMOVE(&module->shdict, shdict, list);
+	list_for_each_entry_safe(shdict, shdict_tmp, &module->shdicts, list) {
+		list_del(&shdict->list);
 		kvcache_dict_free(&shdict->dict);
 		kfree(shdict->name);
 		kfree(shdict);
@@ -667,7 +667,7 @@ int modules_show(struct seq_file *m, void *v)
 	seq_printf(m, "%s\n", TABLINE);
 
 	read_lock_bh(&modules_lock);
-	TAILQ_FOREACH(module, &lsm_modules, list) {
+	list_for_each_entry(module, &lsm_modules, list) {
 		seq_printf(m, "%-12s %-10s %6zu %6d  %-48s\n",
 			module->name, module->license, module->chunk_len,
 			module->nhooks, module->author);

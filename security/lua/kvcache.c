@@ -143,7 +143,7 @@ kvcache_module_link(struct kvcache_dict *dict,
 		atomic_inc(&dict->count);
 		if (module) {
 			spin_lock(&module->kvnodes_lock);
-			TAILQ_INSERT_TAIL(&module->kvnodes, node, modlist);
+			list_add_tail(&node->modlist, &module->kvnodes);
 			spin_unlock(&module->kvnodes_lock);
 		}
 	}
@@ -161,7 +161,7 @@ kvcache_module_unlink_unlocked(struct kvcache_dict *dict,
 	atomic_dec(&dict->count);
 	if (module) {
 		spin_lock(&module->kvnodes_lock);
-		TAILQ_REMOVE(&module->kvnodes, node, modlist);
+		list_del(&node->modlist);
 		spin_unlock(&module->kvnodes_lock);
 	}
 }
@@ -382,15 +382,15 @@ ret:
 
 void kvcache_module_nodes_gc(struct lua_module *module)
 {
-	TAILQ_HEAD(, kvcache_node) cleanup_list;
+	struct list_head cleanup_list;
 	struct kvcache_node *node, *tmp;
 
-	TAILQ_INIT(&cleanup_list);
+	INIT_LIST_HEAD(&cleanup_list);
 	spin_lock(&module->kvnodes_lock);
-	TAILQ_SWAP(&module->kvnodes, &cleanup_list, kvcache_node, modlist);
+	list_cut_position(&cleanup_list, &module->kvnodes, module->kvnodes.next);
 	spin_unlock(&module->kvnodes_lock);
 
-	TAILQ_FOREACH_SAFE(node, &cleanup_list, modlist, tmp) {
+	list_for_each_entry_safe(node, tmp, &cleanup_list, modlist) {
 		struct kvcache_dict *dict = node->dict;
 
 		BUG_ON(!dict);

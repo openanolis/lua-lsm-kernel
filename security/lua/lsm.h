@@ -8,16 +8,15 @@
 #ifndef _SECURITY_LUA_LSM_LSM_H
 #define _SECURITY_LUA_LSM_LSM_H
 
+#include <linux/list.h>
 #include <linux/sched.h>
 #include <linux/fs.h>
 #include <linux/msg.h>
 #include <net/sock.h>
 #include <linux/lsm_hooks.h>
-#include <linux/lua.h>
 #include <linux/spinlock.h>
+#include <linux/lua.h>
 #include "bitmap.h"
-#undef LIST_HEAD
-#include "queue.h"
 #include "kvcache.h"
 
 /* Flag indicating whether initialization completed */
@@ -29,7 +28,6 @@ extern int lua_lsm_initialized __initdata;
 struct lua_lsm_hook_stat {
 	const char *name;
 	atomic_t nhooks;
-	TAILQ_ENTRY(lua_lsm_hook_stat) list;
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
 	atomic_t count;
 	atomic64_t time;        /* ns */
@@ -56,7 +54,7 @@ enum {
 };
 
 struct lua_module_shdict {
-	TAILQ_ENTRY(lua_module_shdict) list;
+	struct list_head list;
 	const char *name;
 	struct kvcache_dict dict;
 };
@@ -67,21 +65,19 @@ struct lua_module {
 	const char *description;
 	const char *license;
 	int version;
-	TAILQ_ENTRY(lua_module) list;
+	struct list_head list;
 	__BITMAP_TYPE(, uint32_t, __LL_NR_MAX) hookfuncs;
 	int nhooks;
 	char *chunk;
 	size_t chunk_len;
-	TAILQ_HEAD(, lua_module_shdict) shdict;
+	struct list_head shdicts;
 	rwlock_t shdict_lock;
 	atomic_t shdict_count;
-	TAILQ_HEAD(, kvcache_node) kvnodes;
+	struct list_head kvnodes;
 	spinlock_t kvnodes_lock;
 };
 
-TAILQ_HEAD(lua_modules_head, lua_module);
-
-extern struct lua_modules_head lsm_modules;
+extern struct list_head lsm_modules;
 extern rwlock_t modules_lock;
 
 

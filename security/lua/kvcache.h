@@ -8,11 +8,10 @@
 #ifndef _SECURITY_LUA_LSM_KVCACHE_H
 #define _SECURITY_LUA_LSM_KVCACHE_H
 
+#include <linux/list.h>
 #include <linux/rwlock.h>
 #include <linux/lua.h>
 #include "refcount.h"
-#undef LIST_HEAD
-#include "queue.h"
 #undef RB_ROOT
 #include "tree.h"
 
@@ -33,7 +32,7 @@ struct kvcache_node {
 		void *p;
 	};
 	RB_ENTRY(kvcache_node) node;
-	TAILQ_ENTRY(kvcache_node) modlist;
+	struct list_head modlist;
 };
 
 struct kvcache_dict {

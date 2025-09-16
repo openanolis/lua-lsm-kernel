@@ -132,7 +132,7 @@
 		lua_getfenv(L, -1);			/* save thread.fenv */		\
 		lua_getfield(L, LUA_REGISTRYINDEX, "_MODULES");				\
 		/* stack: [traceback, thread, env, _MODULES] */				\
-		TAILQ_FOREACH(module, &lsm_modules, list) {				\
+		list_for_each_entry(module, &lsm_modules, list) {			\
 			if (!__BITMAP_ISSET(__LL_NR_ ## NAME, &module->hookfuncs))	\
 				continue;						\
 			lua_getfield(L, -1, module->name);				\
