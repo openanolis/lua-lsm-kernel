@@ -78,7 +78,7 @@ struct lua_module {
 };
 
 extern struct list_head lsm_modules;
-extern rwlock_t modules_lock;
+extern struct srcu_struct modules_ss;
 
 
 #define TABLINE	"--------------------------------------------"		\

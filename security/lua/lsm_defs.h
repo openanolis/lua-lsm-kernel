@@ -132,7 +132,8 @@
 		lua_getfenv(L, -1);			/* save thread.fenv */		\
 		lua_getfield(L, LUA_REGISTRYINDEX, "_MODULES");				\
 		/* stack: [traceback, thread, env, _MODULES] */				\
-		list_for_each_entry(module, &lsm_modules, list) {			\
+		list_for_each_entry_srcu(module, &lsm_modules, list,			\
+					srcu_read_lock_held(&modules_ss)) {		\
 			if (!__BITMAP_ISSET(__LL_NR_ ## NAME, &module->hookfuncs))	\
 				continue;						\
 			lua_getfield(L, -1, module->name);				\
@@ -158,15 +159,16 @@
 	rettype lua_lsm_ ## NAME(DECL_ARGS_ ## x					\
 				__MAP(x, __SC_DECL, __VA_ARGS__))			\
 	{										\
+		int idx;								\
 		int ret;								\
 		START_STATS(NAME);							\
-		read_lock_bh(&modules_lock);						\
+		idx = srcu_read_lock(&modules_ss);					\
 		ret = __prepare_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));		\
 		if (ret >= 0) {								\
 			ret = __lua_lsm_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));	\
 			__postpone_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));		\
 		}									\
-		read_unlock_bh(&modules_lock);						\
+		srcu_read_unlock(&modules_ss, idx);					\
 		END_STATS(NAME);							\
 		return (rettype)ret;							\
 	}										\

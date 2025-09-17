@@ -47,7 +47,8 @@ int lua_lsm_initialized __initdata;
 /********************************* lsm hook *********************************/
 
 struct list_head lsm_modules = LIST_HEAD_INIT(lsm_modules);
-DEFINE_RWLOCK(modules_lock);
+static DEFINE_SPINLOCK(modules_lock);
+DEFINE_SRCU(modules_ss);
 
 struct lua_lsm_hook_stat lua_lsm_hook_stats[] = {
 	#define LSM_HOOK(RET, DEFAULT, NAME, ...)			\
@@ -78,6 +79,7 @@ static int lua_shared_index(lua_State *L)
 	const char *name = luaL_checkstring(L, 2);
 	struct lua_module_shdict *shdict;
 	struct lua_module *module;
+	int found = 0;
 
 	__log_info("READ shared table, [%s] %s\n",
 		luaL_typename(L, 2), lua_tostring(L, 2) ?: "(null)");
@@ -92,10 +94,12 @@ static int lua_shared_index(lua_State *L)
 
 	write_lock(&module->shdict_lock);
 	list_for_each_entry(shdict, &module->shdicts, list) {
-		if (strcmp(shdict->name, name) == 0)
+		if (strcmp(shdict->name, name) == 0) {
+			found = 1;
 			break;
+		}
 	}
-	if (!shdict) {
+	if (!found) {
 		shdict = kmalloc(sizeof(struct lua_module_shdict), GFP_NOFS);
 		if (shdict == NULL)
 			goto err_unlock;
@@ -386,6 +390,16 @@ static int lvm_writer(lua_State *L, const void *b, size_t size, void *B)
 	return 0;
 }
 
+static void lua_module_free(struct lua_module *module)
+{
+	kfree(module->chunk);
+	kfree(module->name);
+	kfree(module->author);
+	kfree(module->description);
+	kfree(module->license);
+	kfree(module);
+}
+
 int lua_module_register(const char *code, size_t len)
 {
 	struct lua_module *module, *m;
@@ -393,6 +407,7 @@ int lua_module_register(const char *code, size_t len)
 	luaL_Buffer B;
 	const char *chunk;
 	size_t chunk_len;
+	int found = 0;
 	int i;
 	int status;
 	int err;
@@ -529,23 +544,25 @@ int lua_module_register(const char *code, size_t len)
 	INIT_LIST_HEAD(&module->kvnodes);
 	spin_lock_init(&module->kvnodes_lock);
 
-	write_lock_bh(&modules_lock);
+	spin_lock(&modules_lock);
 	list_for_each_entry(m, &lsm_modules, list) {
-		if (strcmp(module->name, m->name) == 0)
+		if (strcmp(module->name, m->name) == 0) {
+			found = 1;
 			break;
+		}
 	}
-	if (m == NULL) {
-		list_add_tail(&module->list, &lsm_modules);
+	if (!found) {
+		list_add_tail_rcu(&module->list, &lsm_modules);
 
 		for (i = 0; lua_lsm_hook_stats[i].name; i++) {
 			if (__BITMAP_ISSET(i, &module->hookfuncs))
 				atomic_inc(&lua_lsm_hook_stats[i].nhooks);
 		}
 	}
-	write_unlock_bh(&modules_lock);
+	spin_unlock(&modules_lock);
 
 	err = -EEXIST;
-	if (m != NULL) {
+	if (found) {
 		__log_err("module <%s> registered already\n", module->name);
 		goto err_free_module;
 	}
@@ -557,19 +574,14 @@ int lua_module_register(const char *code, size_t len)
 	return 0;
 
 err_free_module:
-	kfree(module->chunk);
-	kfree(module->name);
-	kfree(module->author);
-	kfree(module->description);
-	kfree(module->license);
-	kfree(module);
+	lua_module_free(module);
 err_free_lua:
 	lua_state_free(L);
 
 	return err;
 }
 
-static int lua_module_remove(lua_State *L, struct lua_module *module)
+static int lua_module_remove_lvm(lua_State *L, struct lua_module *module)
 {
 	int removed = 0;
 
@@ -587,34 +599,39 @@ static int lua_module_remove(lua_State *L, struct lua_module *module)
 
 int lua_module_unregister(const char *name)
 {
-	struct lua_module *module, *tmp;
-	struct lua_module_shdict *shdict, *shdict_tmp;
+	struct lua_module *module;
+	struct lua_module_shdict *shdict, *tmp;
 	struct task_struct *g, *task;
 	unsigned int cpu;
+	int found = 0;
 	int count = 0;
 	int i;
 
-	write_lock_bh(&modules_lock);
-	list_for_each_entry_safe(module, tmp, &lsm_modules, list) {
+	spin_lock(&modules_lock);
+	list_for_each_entry(module, &lsm_modules, list) {
 		if (strcmp(module->name, name) == 0) {
-			list_del(&module->list);
+			found = 1;
 			break;
 		}
 	}
+	if (found) {
+		list_del_rcu(&module->list);
 
-	if (!module) {
-		write_unlock_bh(&modules_lock);
-		return -ENOENT;
+		for (i = 0; lua_lsm_hook_stats[i].name; i++) {
+			if (__BITMAP_ISSET(i, &module->hookfuncs))
+				atomic_dec(&lua_lsm_hook_stats[i].nhooks);
+		}
 	}
+	spin_unlock(&modules_lock);
+
+	if (!found)
+		return -ENOENT;
 
 	pr_info("Prepare to unregister module <%s> ...\n", name);
 
-	for (i = 0; lua_lsm_hook_stats[i].name; i++) {
-		if (__BITMAP_ISSET(i, &module->hookfuncs))
-			atomic_dec(&lua_lsm_hook_stats[i].nhooks);
-	}
+	synchronize_srcu(&modules_ss);
 
-	list_for_each_entry_safe(shdict, shdict_tmp, &module->shdicts, list) {
+	list_for_each_entry_safe(shdict, tmp, &module->shdicts, list) {
 		list_del(&shdict->list);
 		kvcache_dict_free(&shdict->dict);
 		kfree(shdict->name);
@@ -627,7 +644,7 @@ int lua_module_unregister(const char *name)
 	read_lock(&tasklist_lock);
 	for_each_process_thread(g, task) {
 		lua_State *L = lua_lsm_task(task)->L;
-		if (lua_module_remove(L, module))
+		if (lua_module_remove_lvm(L, module))
 			count++;
 	}
 	read_unlock(&tasklist_lock);
@@ -636,22 +653,16 @@ int lua_module_unregister(const char *name)
 	cpus_read_lock();
 	for_each_possible_cpu(cpu) {
 		task = idle_task(cpu);
-		if (lua_module_remove(lua_lsm_task(task)->L, module))
+		if (lua_module_remove_lvm(lua_lsm_task(task)->L, module))
 			count++;
 	}
 	cpus_read_unlock();
 
-	write_unlock_bh(&modules_lock);
 
 	pr_info("Unregistered module <%s> from %d/%d Lua VMs.\n",
 		name, count, atomic_read(&vm_nalloc) - atomic_read(&vm_nfree));
 
-	kfree(module->chunk);
-	kfree(module->name);
-	kfree(module->author);
-	kfree(module->description);
-	kfree(module->license);
-	kfree(module);
+	lua_module_free(module);
 	return 0;
 }
 
@@ -660,19 +671,21 @@ int lua_module_unregister(const char *name)
 int modules_show(struct seq_file *m, void *v)
 {
 	struct lua_module *module;
+	int idx;
 
 	seq_printf(m, "modules for lua-lsm\n");
 	seq_printf(m, "%-12s %-10s %6s %6s  %-48s\n",
 		"name", "license", "size", "nhooks", "author");
 	seq_printf(m, "%s\n", TABLINE);
 
-	read_lock_bh(&modules_lock);
-	list_for_each_entry(module, &lsm_modules, list) {
+	idx = srcu_read_lock(&modules_ss);
+	list_for_each_entry_srcu(module, &lsm_modules, list,
+				srcu_read_lock_held(&modules_ss)) {
 		seq_printf(m, "%-12s %-10s %6zu %6d  %-48s\n",
 			module->name, module->license, module->chunk_len,
 			module->nhooks, module->author);
 	}
-	read_unlock_bh(&modules_lock);
+	srcu_read_unlock(&modules_ss, idx);
 	return 0;
 }
 
@@ -701,7 +714,7 @@ int lua_lsm_status_show(struct seq_file *m, void *v)
 	total = 0;
 	minimum = INT_MAX;
 	maximum = 0;
-	write_lock_bh(&modules_lock);
+	spin_lock(&modules_lock);	/* TODO: Still need it? */
 	read_lock(&tasklist_lock);
 	for_each_process_thread(g, p) {
 		L = lua_lsm_task(p)->L;
@@ -723,7 +736,7 @@ int lua_lsm_status_show(struct seq_file *m, void *v)
 		maximum = max(maximum, nbytes);
 	}
 	cpus_read_unlock();
-	write_unlock_bh(&modules_lock);
+	spin_unlock(&modules_lock);
 
 	avg = inuse ? total / inuse : 0;
 	seq_printf(m, "  Mem usage:  total %d, min %d, max %d, inuse %d, average %d\n",
