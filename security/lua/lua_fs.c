@@ -211,7 +211,7 @@ static int fs_file_fmode(lua_State *L)
 	int top = lua_gettop(L);
 	if (top >= 2) {
 		int start = (top == 2) ? 2 : 3;
-		int and = lua_toboolean(L, 2);
+		int and = lua_isboolean(L, 2) && lua_toboolean(L, 2);
 		fmode_t flags = tocflags(L, start, top, opts, 0);
 		fmode_t res = file->f_mode & flags;
 		lua_pushboolean(L, and ? res == flags : (int)res);
