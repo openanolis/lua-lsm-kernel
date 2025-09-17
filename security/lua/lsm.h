@@ -55,8 +55,8 @@ enum {
 
 struct lua_module_shdict {
 	struct list_head list;
-	const char *name;
 	struct kvcache_dict dict;
+	char name[];
 };
 
 struct lua_module {
@@ -71,7 +71,7 @@ struct lua_module {
 	char *chunk;
 	size_t chunk_len;
 	struct list_head shdicts;
-	rwlock_t shdict_lock;
+	spinlock_t shdict_lock;
 	atomic_t shdict_count;
 	struct list_head kvnodes;
 	spinlock_t kvnodes_lock;

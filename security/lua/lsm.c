@@ -77,11 +77,11 @@ struct lua_lsm_hook_stat lua_lsm_hook_stats[] = {
 static int lua_shared_index(lua_State *L)
 {
 	const char *name = luaL_checkstring(L, 2);
-	struct lua_module_shdict *shdict;
+	struct lua_module_shdict *shdict, *shtmp;
 	struct lua_module *module;
 	int found = 0;
 
-	__log_info("READ shared table, [%s] %s\n",
+	__log_info_ratelimited("READ shared table, [%s] %s\n",
 		luaL_typename(L, 2), lua_tostring(L, 2) ?: "(null)");
 
 	lua_pushlightuserdata(L, MODULE_KEY);
@@ -92,25 +92,44 @@ static int lua_shared_index(lua_State *L)
 	}
 	module = lua_touserdata(L, -1);
 
-	write_lock(&module->shdict_lock);
-	list_for_each_entry(shdict, &module->shdicts, list) {
+	rcu_read_lock();
+	list_for_each_entry_rcu(shdict, &module->shdicts, list) {
 		if (strcmp(shdict->name, name) == 0) {
 			found = 1;
 			break;
 		}
 	}
+	rcu_read_unlock();
+
 	if (!found) {
-		shdict = kmalloc(sizeof(struct lua_module_shdict), GFP_NOFS);
+		size_t l = strlen(name);
+		shdict = kmalloc(struct_size(shdict, name, l + 1), GFP_NOFS);
 		if (shdict == NULL)
-			goto err_unlock;
-		shdict->name = kstrdup(name, GFP_NOFS);
-		if (shdict->name == NULL)
-			goto err_free;
+			return 0;
 		kvcache_dict_init(&shdict->dict);
-		atomic_inc(&module->shdict_count);
-		list_add_tail(&shdict->list, &module->shdicts);
+		memcpy(shdict->name, name, l);
+		shdict->name[l] = '\0';
+
+		spin_lock(&module->shdict_lock);
+		list_for_each_entry(shtmp, &module->shdicts, list) {
+			if (strcmp(shtmp->name, name) == 0) {
+				found = 1;
+				break;
+			}
+		}
+		if (!found) {
+			atomic_inc(&module->shdict_count);
+			list_add_tail_rcu(&shdict->list, &module->shdicts);
+		}
+		spin_unlock(&module->shdict_lock);
+
+		if (found) {
+			kvcache_dict_free(&shdict->dict);
+			kfree(shdict);
+
+			shdict = shtmp;
+		}
 	}
-	write_unlock(&module->shdict_lock);
 
 	/* shared[name] = shdict */
 	lua_pushvalue(L, 2);
@@ -120,12 +139,6 @@ static int lua_shared_index(lua_State *L)
 	lua_settop(L, 2);
 	lua_rawget(L, 1);
 	return 1;
-
-err_free:
-	kfree(shdict);
-err_unlock:
-	write_unlock(&module->shdict_lock);
-	return 0;
 }
 
 static int lua_shared_newindex(lua_State *L)
@@ -538,7 +551,7 @@ int lua_module_register(const char *code, size_t len)
 	module->chunk_len = chunk_len;
 
 	INIT_LIST_HEAD(&module->shdicts);
-	rwlock_init(&module->shdict_lock);
+	spin_lock_init(&module->shdict_lock);
 	atomic_set(&module->shdict_count, 0);
 
 	INIT_LIST_HEAD(&module->kvnodes);
@@ -634,7 +647,6 @@ int lua_module_unregister(const char *name)
 	list_for_each_entry_safe(shdict, tmp, &module->shdicts, list) {
 		list_del(&shdict->list);
 		kvcache_dict_free(&shdict->dict);
-		kfree(shdict->name);
 		kfree(shdict);
 	}
 
