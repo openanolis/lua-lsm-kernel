@@ -14,6 +14,7 @@
 #include <linux/lua.h>
 #include <linux/lualib.h>
 #include <linux/lauxlib.h>
+#include <linux/securebits.h>
 #include "lsm.h"
 #include "auxlib.h"
 #include "kvcache.h"
@@ -92,12 +93,45 @@ static int kernel_cred_cap_ambient(lua_State *L)
 	}
 }
 
+/*
+ * table = cred:securebits()
+ * bool = cred:securebits('keep_caps')
+ * bool = cred:securebits(true, 'keep_caps', 'noroot')
+ */
+static int kernel_cred_securebits(lua_State *L)
+{
+	static const struct cflag_opt opts[] = {
+		{ "noroot",				SECBIT_NOROOT			},
+		{ "no_setuid_fixup",		SECBIT_NO_SETUID_FIXUP	},
+		{ "keep_caps",			SECBIT_KEEP_CAPS		},
+		{ "no_cap_ambient_raise",	SECBIT_NO_CAP_AMBIENT_RAISE	},
+		{ "exec_restrict_file",		SECBIT_EXEC_RESTRICT_FILE	},
+		{ "exec_deny_interactive",	SECBIT_EXEC_DENY_INTERACTIVE	},
+		{ NULL, 0 }
+	};
+	struct cred *cred = tocred(L, 1);
+	int top = lua_gettop(L);
+	if (top >= 2) {
+		int start = (top == 2) ? 2 : 3;
+		int and = lua_isboolean(L, 2) && lua_toboolean(L, 2);
+		unsigned int flags = tocflags(L, start, top, opts, 0);
+		unsigned int res = cred->securebits & flags;
+		lua_pushboolean(L, and ? res == flags : (int)res);
+		return 1;
+	} else if (top == 1) {
+		table_fromopts(L, opts, 0, (unsigned int)cred->securebits);
+		return 1;
+	}
+	return 0;
+}
+
 static const luaL_Reg cred_meth[] = {
 	{ "uids",		kernel_cred_uids	},
 	{ "gids",		kernel_cred_gids	},
 	{ "cap_eip",		kernel_cred_cap_eip	},
 	{ "cap_bset",		kernel_cred_cap_bset	},
 	{ "cap_ambient",	kernel_cred_cap_ambient	},
+	{ "securebits",		kernel_cred_securebits	},
 	{ NULL, NULL }
 };
 
