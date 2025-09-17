@@ -114,12 +114,13 @@ kvcache_lookup(struct kvcache_dict *dict,
 	struct lua_module *module, const char *key)
 {
 	struct kvcache_node tmp, *node;
+	unsigned long flags;
 	tmp.key = key;
 	tmp.module = module;
-	read_lock(&dict->lock);
+	read_lock_irqsave(&dict->lock, flags);
 	node = RB_FIND(kvcache, &dict->root, &tmp);
 	kvcache_node_hold(node);
-	read_unlock(&dict->lock);
+	read_unlock_irqrestore(&dict->lock, flags);
 	return node;
 }
 
@@ -128,8 +129,9 @@ kvcache_module_link(struct kvcache_dict *dict,
 		struct lua_module *module, struct kvcache_node *node)
 {
 	struct kvcache_node *prev;
+	unsigned long flags;
 
-	write_lock(&dict->lock);
+	write_lock_irqsave(&dict->lock, flags);
 
 	if (atomic_read(&dict->count) >= dict->capacity) {
 		prev = ERR_PTR(-ERANGE);
@@ -149,7 +151,7 @@ kvcache_module_link(struct kvcache_dict *dict,
 	}
 
 unlock:
-	write_unlock(&dict->lock);
+	write_unlock_irqrestore(&dict->lock, flags);
 	return prev;
 }
 
@@ -170,9 +172,10 @@ static void
 kvcache_module_unlink(struct kvcache_dict *dict,
 		struct lua_module *module, struct kvcache_node *node)
 {
-	write_lock(&dict->lock);
+	unsigned long flags;
+	write_lock_irqsave(&dict->lock, flags);
 	kvcache_module_unlink_unlocked(dict, module, node);
-	write_unlock(&dict->lock);
+	write_unlock_irqrestore(&dict->lock, flags);
 }
 
 static int kvcache_node_fill(lua_State *L, int idx, struct kvcache_node *node)
@@ -217,16 +220,17 @@ kvcache_node_copy(struct kvcache_node *node, struct kvcache_node *src)
 static int kvcache_node_refill(lua_State *L, int idx, struct kvcache_node *node)
 {
 	struct kvcache_node ntmp;
+	unsigned long flags;
 	int err;
 
 	err = kvcache_node_fill(L, idx, &ntmp);
 	if (err)
 		return err;
 
-	write_lock(&node->lock);
+	write_lock_irqsave(&node->lock, flags);
 	kvcache_node_clear(node);
 	kvcache_node_copy(node, &ntmp);
-	write_unlock(&node->lock);
+	write_unlock_irqrestore(&node->lock, flags);
 
 	return 0;
 }
@@ -290,10 +294,11 @@ ret:
 static int kvcache_node_get(lua_State *L, struct kvcache_node *node)
 {
 	struct kvcache_node ntmp;
+	unsigned long flags;
 
-	read_lock(&node->lock);
+	read_lock_irqsave(&node->lock, flags);
 	kvcache_node_copy(&ntmp, node);
-	read_unlock(&node->lock);
+	read_unlock_irqrestore(&node->lock, flags);
 
 	switch (ntmp.tt) {
 	case LUA_TBOOLEAN:
@@ -339,14 +344,15 @@ kvcache_incr(lua_State *L, struct kvcache_dict *dict, struct lua_module *module)
 
 	node = kvcache_lookup(dict, module, key);
 	if (node) {
-		write_lock(&node->lock);
+		unsigned long flags;
+		write_lock_irqsave(&node->lock, flags);
 		if (node->tt == LUA_TNUMBER) {
 			node->n += n;
 			n = node->n;
 		} else {
 			err = -EINVAL;
 		}
-		write_unlock(&node->lock);
+		write_unlock_irqrestore(&node->lock, flags);
 		kvcache_node_drop(node);
 		goto ret;
 	}
@@ -406,14 +412,22 @@ void kvcache_module_nodes_gc(struct lua_module *module)
 void kvcache_dict_free(struct kvcache_dict *dict)
 {
 	struct kvcache_node *node, *n;
+	unsigned long flags;
 
-	write_lock(&dict->lock);
+	/*
+	 * Avoid being called in softirq, such as the LSM function
+	 * inode_free_security_rcu will run in the RCU softirq context,
+	 * socket_sock_rcv_skb maybe run in the NET_RX softirq to
+	 * receive data, and file_free_security maybe run in the worker
+	 * thread to delay release the file object via delayed_fput.
+	 */
+	write_lock_irqsave(&dict->lock, flags);
 	RB_FOREACH_SAFE(node, kvcache, &dict->root, n) {
 		kvcache_module_unlink_unlocked(dict, node->module, node);
 		kvcache_node_drop(node);
 	}
 	WARN_ON(atomic_read(&dict->count) != 0);
-	write_unlock(&dict->lock);
+	write_unlock_irqrestore(&dict->lock, flags);
 }
 
 void kvcache_dict_init(struct kvcache_dict *dict)
@@ -568,16 +582,17 @@ static int shdict_index(lua_State *L)
 static int shdict_tostring(lua_State *L)
 {
 	struct kvcache_dict *shdict = toshdict(L, 1);
-	read_lock(&shdict->lock);
+	unsigned long flags;
+	read_lock_irqsave(&shdict->lock, flags);
 	lua_pushfstring(L, "shdict (%d / %d)",
 			atomic_read(&shdict->count), shdict->capacity);
-	read_unlock(&shdict->lock);
+	read_unlock_irqrestore(&shdict->lock, flags);
 	return 1;
 }
 
 static int shdict_gc(lua_State *L)
 {
-	__log_info("shdict already freed by unregister\n");
+	__log_info_ratelimited("shdict already freed by unregister\n");
 	return 0;
 }
 

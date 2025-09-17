@@ -102,6 +102,7 @@ static int lua_shared_index(lua_State *L)
 	rcu_read_unlock();
 
 	if (!found) {
+		unsigned long flags;
 		size_t l = strlen(name);
 		shdict = kmalloc(struct_size(shdict, name, l + 1), GFP_NOFS);
 		if (shdict == NULL)
@@ -110,7 +111,7 @@ static int lua_shared_index(lua_State *L)
 		memcpy(shdict->name, name, l);
 		shdict->name[l] = '\0';
 
-		spin_lock(&module->shdict_lock);
+		spin_lock_irqsave(&module->shdict_lock, flags);
 		list_for_each_entry(shtmp, &module->shdicts, list) {
 			if (strcmp(shtmp->name, name) == 0) {
 				found = 1;
@@ -121,7 +122,7 @@ static int lua_shared_index(lua_State *L)
 			atomic_inc(&module->shdict_count);
 			list_add_tail_rcu(&shdict->list, &module->shdicts);
 		}
-		spin_unlock(&module->shdict_lock);
+		spin_unlock_irqrestore(&module->shdict_lock, flags);
 
 		if (found) {
 			kvcache_dict_free(&shdict->dict);
