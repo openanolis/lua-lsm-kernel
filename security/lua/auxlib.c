@@ -61,10 +61,10 @@ void lua_table_dump(lua_State *L, const char *prefix)
 /* borrowed from lua.c */
 int lua_traceback(lua_State *L)
 {
-	__log_err("@_@ LuaVM: top = %d\n", lua_gettop(L));
+	pr_err("@_@ LuaVM: top = %d\n", lua_gettop(L));
 	if (!lua_isstring(L, 1))  /* 'message' not a string? */
 		return 1;  /* keep it intact */
-	__log_err("@_@ LuaVM: %s\n", lua_tostring(L, -1));
+	pr_err("@_@ LuaVM: %s\n", lua_tostring(L, -1));
 	lua_getfield(L, LUA_GLOBALSINDEX, "debug");
 	if (!lua_istable(L, -1)) {
 		lua_pop(L, 1);
@@ -78,7 +78,7 @@ int lua_traceback(lua_State *L)
 	lua_pushvalue(L, 1);  /* pass error message */
 	lua_pushinteger(L, 2);  /* skip this function and traceback */
 	lua_call(L, 2, 1);  /* call debug.traceback */
-	__log_err("@_@ LuaVM stack: %s\n", lua_tostring(L, -1));
+	pr_err("@_@ LuaVM stack:\n%s\n", lua_tostring(L, -1));
 
 	__log_err("------------------ C stack dump start ------------------\n");
 	dump_stack();
