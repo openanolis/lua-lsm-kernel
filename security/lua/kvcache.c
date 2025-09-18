@@ -55,9 +55,8 @@ kvcache_node_alloc(struct kvcache_dict *dict, struct lua_module *module,
 	size_t l = sizeof(struct kvcache_node);
 	struct kvcache_node *node;
 
-	WARN_ON(in_atomic());
 	l += key ? (len + 1) : 0;
-	node = kmalloc(l, GFP_NOFS);
+	node = kmalloc(l, lua_lsm_gfp());
 	if (node == NULL)
 		return NULL;
 

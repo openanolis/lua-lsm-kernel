@@ -122,11 +122,12 @@
 	static inline int __lua_lsm_ ## NAME(DECL_ARGS_ ## x				\
 					__MAP(x, __SC_DECL, __VA_ARGS__))		\
 	{										\
-		lua_State *L = lua_lsm_task(current)->L;				\
 		struct lua_module *module;						\
+		lua_State *L;								\
 		int ret = LSM_RET_DEFAULT(NAME);					\
 		if (atomic_read(&lua_lsm_hook_stats[__LL_NR_ ## NAME].nhooks) == 0)	\
 			return ret;							\
+		L = lvm_get();								\
 		lua_pushcfunction(L, lua_traceback);					\
 		lua_pushthread(L);							\
 		lua_getfenv(L, -1);			/* save thread.fenv */		\
@@ -138,6 +139,7 @@
 				continue;						\
 			lua_getfield(L, -1, module->name);				\
 			lua_getfield(L, -1, #NAME);					\
+			WARN_ON(lua_gettop(L) != 6);					\
 			/* stack: [traceback, thread, env, _MODULES, _M, lfunc] */	\
 			if (lua_isfunction(L, -1)) {					\
 				int top = lua_gettop(L);				\
@@ -154,6 +156,7 @@
 			RET_CHECK_ ## rettype(NAME, ret);				\
 		}									\
 		lua_pop(L, 4);								\
+		lvm_put(L);								\
 		return ret;								\
 	}										\
 	rettype lua_lsm_ ## NAME(DECL_ARGS_ ## x					\

@@ -74,6 +74,37 @@ struct lua_lsm_hook_stat lua_lsm_hook_stats[] = {
 
 /********************************** Lua VM **********************************/
 
+struct lvm_userdata {
+	bool softirq;
+};
+
+static struct lvm_userdata irq_lvms_ud = {
+	.softirq = true,
+};
+
+static DEFINE_PER_CPU(lua_State *, irq_lvms);
+
+lua_State *lvm_get(void)
+{
+	BUG_ON(in_nmi() || in_hardirq());
+
+	if (in_task())
+		return lua_lsm_task(current)->L;
+	else
+		return get_cpu_var(irq_lvms);
+}
+
+void lvm_put(lua_State *L)
+{
+	(void)L;
+
+	if (in_task())
+		/* Nothing */;
+	else
+		put_cpu_var(irq_lvms);
+}
+
+
 static int lua_shared_index(lua_State *L)
 {
 	const char *name = luaL_checkstring(L, 2);
@@ -104,9 +135,12 @@ static int lua_shared_index(lua_State *L)
 	if (!found) {
 		unsigned long flags;
 		size_t l = strlen(name);
-		shdict = kmalloc(struct_size(shdict, name, l + 1), GFP_NOFS);
-		if (shdict == NULL)
+		shdict = kmalloc(struct_size(shdict, name, l + 1),
+				lua_lsm_gfp());
+		if (shdict == NULL) {
+			__log_err("No memory\n");
 			return 0;
+		}
 		kvcache_dict_init(&shdict->dict);
 		memcpy(shdict->name, name, l);
 		shdict->name[l] = '\0';
@@ -294,8 +328,10 @@ static atomic_t mem_nfree = ATOMIC_INIT(0);
 
 static void *lvm_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
 {
-	(void)ud;
+	struct lvm_userdata *args = ud;
+
 	(void)osize;
+	(void)args;
 
 	if (nsize == 0) {
 		atomic_inc(&mem_nfree);
@@ -306,7 +342,8 @@ static void *lvm_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
 			atomic_inc(&mem_nrealloc);
 		else
 			atomic_inc(&mem_nalloc);
-		return krealloc(ptr, nsize, GFP_ATOMIC);
+
+		return krealloc(ptr, nsize, lua_lsm_gfp());
 	}
 }
 
@@ -351,12 +388,12 @@ static int lvm_pmain(lua_State *L)
 	return 1;
 }
 
-static lua_State *lua_state_alloc(void)
+static lua_State *lua_state_alloc(struct lvm_userdata *args)
 {
 	lua_State *L;
 	int status;
 
-	L = lua_newstate(lvm_alloc, NULL);
+	L = lua_newstate(lvm_alloc, args);
 	if (L == NULL)
 		return ERR_PTR(-ENOMEM);
 
@@ -426,7 +463,7 @@ int lua_module_register(const char *code, size_t len)
 	int status;
 	int err;
 
-	L = lua_state_alloc();
+	L = lua_state_alloc(NULL);
 	if (IS_ERR(L))
 		return PTR_ERR(L);
 
@@ -464,7 +501,7 @@ int lua_module_register(const char *code, size_t len)
 	__log_info("lua module loaded, top = %d\n", lua_gettop(L));
 
 	err = -ENOMEM;
-	module = kzalloc(sizeof(*module), GFP_ATOMIC);
+	module = kzalloc(sizeof(*module), GFP_KERNEL);
 	if (module == NULL)
 		goto err_free_lua;
 
@@ -545,7 +582,7 @@ int lua_module_register(const char *code, size_t len)
 	if (module->name == NULL)
 		goto err_free_module;
 
-	module->chunk = kmalloc(chunk_len, GFP_ATOMIC);
+	module->chunk = kmalloc(chunk_len, GFP_KERNEL);
 	if (module->chunk == NULL)
 		goto err_free_module;
 	memcpy(module->chunk, chunk, chunk_len);
@@ -657,6 +694,7 @@ int lua_module_unregister(const char *name)
 	read_lock(&tasklist_lock);
 	for_each_process_thread(g, task) {
 		lua_State *L = lua_lsm_task(task)->L;
+		/* TODO: may sleep in rwlock critical section */
 		if (lua_module_remove_lvm(L, module))
 			count++;
 	}
@@ -668,9 +706,11 @@ int lua_module_unregister(const char *name)
 		task = idle_task(cpu);
 		if (lua_module_remove_lvm(lua_lsm_task(task)->L, module))
 			count++;
+
+		if (lua_module_remove_lvm(per_cpu(irq_lvms, cpu), module))
+			count++;
 	}
 	cpus_read_unlock();
-
 
 	pr_info("Unregistered module <%s> from %d/%d Lua VMs.\n",
 		name, count, atomic_read(&vm_nalloc) - atomic_read(&vm_nfree));
@@ -795,7 +835,7 @@ int lua_task_blob_init(struct task_struct *task)
 
 	kvcache_dict_init(&llt->dict);
 
-	L = lua_state_alloc();
+	L = lua_state_alloc(NULL);
 	if (IS_ERR(L))
 		return PTR_ERR(L);
 
@@ -847,11 +887,20 @@ static const struct lsm_id lua_lsmid = {
 
 static int __init lua_lsm_init(void)
 {
+	lua_State *L;
+	int cpu;
 	int err;
 
 	err = lua_task_blob_init(current);
 	if (err)
 		return err;
+
+	for_each_possible_cpu(cpu) {
+		L = lua_state_alloc(&irq_lvms_ud);
+		if (IS_ERR(L))
+			return PTR_ERR(L);
+		per_cpu(irq_lvms, cpu) = L;
+	}
 
 	security_add_hooks(lua_lsm_hooks, ARRAY_SIZE(lua_lsm_hooks), &lua_lsmid);
 
