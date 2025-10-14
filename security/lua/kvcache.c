@@ -29,19 +29,17 @@ static int kvcache_node_cmp(struct kvcache_node *n1, struct kvcache_node *n2)
 RB_GENERATE_STATIC(kvcache, kvcache_node, node, kvcache_node_cmp);
 
 
-static int kvcache_result(lua_State *L, int err, int nresults)
+static int kvcache_result(lua_State *L, int err)
 {
-	const char *error = "unknown error";
-
-	if (err >= 0)
-		return nresults;
+	const char *error;
 
 	switch (err) {
-	case -ENOMEM:	error = "no memory";		break;
-	case -EINVAL:	error = "invalid value";	break;
-	case -ERANGE:	error = "no space";		break;
-	case -ESRCH:	error = "no module";		break;
-	case -EEXIST:	error = "exists";		break;
+	case -ENOMEM:	error = "no memory";	break;
+	case -EINVAL:	error = "invalid";	break;
+	case -ERANGE:	error = "no space";	break;
+	case -ESRCH:	error = "no module";	break;
+	case -EEXIST:	error = "exists";	break;
+	default:	error = "unknown";	break;
 	}
 	lua_pushnil(L);
 	lua_pushstring(L, error);
@@ -241,53 +239,50 @@ kvcache_set(lua_State *L, struct kvcache_dict *dict, struct lua_module *module)
 	const char *key = luaL_checklstring(L, 2, &len);
 	int tt = lua_type(L, 3);
 	struct kvcache_node *node, *prev;
-	int err = 0;
+	int err;
 
 	node = kvcache_lookup(dict, module, key);
-	if (node) {
+	if (node == NULL) {
+		if (tt == LUA_TNIL)
+			goto ret;
+
+		node = kvcache_node_alloc(dict, module, key, len);
+		if (node == NULL)
+			return kvcache_result(L, -ENOMEM);
+
+		err = kvcache_node_fill(L, 3, node);
+		if (err) {
+			kvcache_node_free(node);
+			return kvcache_result(L, err);
+		}
+
+		prev = kvcache_module_link(dict, module, node);
+		if (prev) {
+			kvcache_node_free(node);
+
+			if (IS_ERR(prev))
+				return kvcache_result(L, PTR_ERR(prev));
+
+			err = kvcache_node_refill(L, 3, prev);
+			kvcache_node_drop(prev);
+		}
+	} else {
 		if (tt == LUA_TNIL) {
 			kvcache_module_unlink(dict, module, node);
 			kvcache_node_drop(node);
+			err = 0;
 		} else {
 			err = kvcache_node_refill(L, 3, node);
 		}
 		kvcache_node_drop(node);
-		goto ret;
 	}
 
-	if (tt == LUA_TNIL)
-		goto ret;
-
-	err = -ENOMEM;
-	node = kvcache_node_alloc(dict, module, key, len);
-	if (node == NULL)
-		goto ret;
-
-	err = kvcache_node_fill(L, 3, node);
-	if (err) {
-		kvcache_node_free(node);
-		goto ret;
-	}
-
-	err = -EEXIST;
-	prev = kvcache_module_link(dict, module, node);
-	if (prev) {
-		if (IS_ERR(prev))
-			err = PTR_ERR(prev);
-		else
-			kvcache_node_drop(prev);
-
-		kvcache_node_free(node);
-		goto ret;
-	}
-
-	err = 0;
+	if (err)
+		return kvcache_result(L, err);
 
 ret:
-	if (!err)
-		lua_pushboolean(L, 1);
-
-	return kvcache_result(L, err, 1);
+	lua_pushboolean(L, 1);
+	return 1;
 }
 
 static int kvcache_node_get(lua_State *L, struct kvcache_node *node)
@@ -339,50 +334,46 @@ kvcache_incr(lua_State *L, struct kvcache_dict *dict, struct lua_module *module)
 	const char *key = luaL_checklstring(L, 2, &len);
 	lua_Number n = luaL_optnumber(L, 3, 1);
 	struct kvcache_node *node, *prev;
-	int err = 0;
+	unsigned long flags;
+	int err;
 
 	node = kvcache_lookup(dict, module, key);
-	if (node) {
-		unsigned long flags;
+	if (node == NULL) {
+		node = kvcache_node_alloc(dict, module, key, len);
+		if (node == NULL)
+			return kvcache_result(L, -ENOMEM);
+
+		node->n = n;
+		node->tt = LUA_TNUMBER;
+
+		prev = kvcache_module_link(dict, module, node);
+		if (prev) {
+			kvcache_node_free(node);
+
+			if (IS_ERR(prev))
+				return kvcache_result(L, PTR_ERR(prev));
+
+			node = prev;
+			goto update;
+		}
+	} else {
+update:
+		err = -EINVAL;
 		write_lock_irqsave(&node->lock, flags);
 		if (node->tt == LUA_TNUMBER) {
 			node->n += n;
 			n = node->n;
-		} else {
-			err = -EINVAL;
+			err = 0;
 		}
 		write_unlock_irqrestore(&node->lock, flags);
 		kvcache_node_drop(node);
-		goto ret;
+
+		if (err)
+			return kvcache_result(L, err);
 	}
 
-	err = -ENOMEM;
-	node = kvcache_node_alloc(dict, module, key, len);
-	if (node == NULL)
-		goto ret;
-
-	node->n = n;
-	node->tt = LUA_TNUMBER;
-
-	err = -EEXIST;
-	prev = kvcache_module_link(dict, module, node);
-	if (prev) {
-		if (IS_ERR(prev))
-			err = PTR_ERR(prev);
-		else
-			kvcache_node_drop(prev);
-
-		kvcache_node_free(node);
-		goto ret;
-	}
-
-	err = 0;
-
-ret:
-	if (!err)
-		lua_pushnumber(L, n);
-
-	return kvcache_result(L, err, 1);
+	lua_pushnumber(L, n);
+	return 1;
 }
 
 void kvcache_module_nodes_gc(struct lua_module *module)
@@ -492,7 +483,7 @@ int lua_object_incr(lua_State *L, struct kvcache_dict *dict)
 
 	module = module_from_object_fenv(L, 1);
 	if (module == NULL)
-		return kvcache_result(L, -ESRCH, 0);
+		return kvcache_result(L, -ESRCH);
 
 	return kvcache_incr(L, dict, module);
 }
@@ -537,7 +528,8 @@ int lua_object_newindex(lua_State *L, struct kvcache_dict *dict)
 
 	module = module_from_object_fenv(L, 1);
 	if (module == NULL)
-		return kvcache_result(L, -ESRCH, 0);
+		return kvcache_result(L, -ESRCH);
+
 	return kvcache_set(L, dict, module);
 }
 
