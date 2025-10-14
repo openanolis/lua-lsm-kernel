@@ -134,7 +134,7 @@ static const struct file_operations fops_module = {
 	.release	= single_release,
 };
 
-#ifdef CONFIG_SECURITY_LUA_LSM_STATS
+#ifdef CONFIG_SECURITY_LUA_LSM_STATISTICS
 
 static int open_status(struct inode *inode, struct file *filp)
 {
@@ -172,7 +172,7 @@ static struct lua_file {
 	{ "register",	0222,	&fops_register		},	/* -w--w--w- */
 	{ "unregister",	0222,	&fops_unregister	},	/* -w--w--w- */
 	{ "module",	0444,	&fops_module		},	/* r--r--r-- */
-#ifdef CONFIG_SECURITY_LUA_LSM_STATS
+#ifdef CONFIG_SECURITY_LUA_LSM_STATISTICS
 	{ "status",	0444,	&fops_status		},	/* r--r--r-- */
 	{ "lsm_funcs",	0444,	&fops_lsm_funcs		},	/* r--r--r-- */
 #endif

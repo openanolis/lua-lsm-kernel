@@ -743,7 +743,7 @@ int modules_show(struct seq_file *m, void *v)
 }
 
 
-#ifdef CONFIG_SECURITY_LUA_LSM_STATS
+#ifdef CONFIG_SECURITY_LUA_LSM_STATISTICS
 
 int lua_lsm_status_show(struct seq_file *m, void *v)
 {

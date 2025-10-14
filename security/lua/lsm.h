@@ -28,7 +28,7 @@ extern int lua_lsm_initialized __initdata;
 struct lua_lsm_hook_stat {
 	const char *name;
 	atomic_t nhooks;
-#ifdef CONFIG_SECURITY_LUA_LSM_STATS
+#ifdef CONFIG_SECURITY_LUA_LSM_STATISTICS
 	atomic_t count;
 	atomic64_t time;        /* ns */
 	atomic64_t maxtime;
@@ -92,7 +92,7 @@ int lua_module_unregister(const char *name);
 
 int modules_show(struct seq_file *m, void *v);
 
-#ifdef CONFIG_SECURITY_LUA_LSM_STATS
+#ifdef CONFIG_SECURITY_LUA_LSM_STATISTICS
 int lua_lsm_status_show(struct seq_file *m, void *v);
 int lsmhook_stat_show(struct seq_file *m, void *v);
 #endif
