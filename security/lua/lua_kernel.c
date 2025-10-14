@@ -313,18 +313,6 @@ static int kernel_ktime_seconds(lua_State *L)
 	return 1;
 }
 
-static int kernel_rcu_read_lock(lua_State *L)
-{
-	rcu_read_lock();
-	return 0;
-}
-
-static int kernel_rcu_read_unlock(lua_State *L)
-{
-	rcu_read_unlock();
-	return 0;
-}
-
 static int kernel_printk(lua_State *L)
 {
 	const char *s = luaL_checkstring(L, 1);
@@ -361,8 +349,6 @@ static const luaL_Reg kernellib[] = {
 	{ "lsm_funcs",		kernel_lsm_funcs	},
 	{ "random",		kernel_random		},
 	{ "ktime_seconds",	kernel_ktime_seconds	},
-	{ "rcu_read_lock",	kernel_rcu_read_lock	},
-	{ "rcu_read_unlock",	kernel_rcu_read_unlock	},
 	{ "printk",		kernel_printk		},
 
 #define XX(name)    { "pr_" #name, kernel_pr_ ## name },
