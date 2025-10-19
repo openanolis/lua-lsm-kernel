@@ -594,6 +594,7 @@ int lua_module_register(const char *code, size_t len)
 
 	INIT_LIST_HEAD(&module->kvnodes);
 	spin_lock_init(&module->kvnodes_lock);
+	atomic_set(&module->kvnodes_count, 0);
 
 	spin_lock(&modules_lock);
 	list_for_each_entry(m, &lsm_modules, list) {

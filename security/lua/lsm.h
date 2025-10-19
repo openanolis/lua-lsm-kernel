@@ -75,6 +75,7 @@ struct lua_module {
 	atomic_t shdict_count;
 	struct list_head kvnodes;
 	spinlock_t kvnodes_lock;
+	atomic_t kvnodes_count;
 };
 
 extern struct list_head lsm_modules;

@@ -143,6 +143,7 @@ kvcache_module_link(struct kvcache_dict *dict,
 		if (module) {
 			spin_lock(&module->kvnodes_lock);
 			list_add_tail(&node->modlist, &module->kvnodes);
+			atomic_inc(&module->kvnodes_count);
 			spin_unlock(&module->kvnodes_lock);
 		}
 	}
@@ -161,6 +162,7 @@ kvcache_module_unlink_unlocked(struct kvcache_dict *dict,
 	if (module) {
 		spin_lock(&module->kvnodes_lock);
 		list_del(&node->modlist);
+		atomic_dec(&module->kvnodes_count);
 		spin_unlock(&module->kvnodes_lock);
 	}
 }
@@ -376,17 +378,22 @@ update:
 	return 1;
 }
 
-void kvcache_module_nodes_gc(struct lua_module *module)
+int kvcache_module_nodes_gc(struct lua_module *module)
 {
 	struct list_head cleanup_list;
 	struct kvcache_node *node, *tmp;
+	unsigned long flags;
+	int count, n = 0;
+
+	count = atomic_read(&module->kvnodes_count);
 
 	INIT_LIST_HEAD(&cleanup_list);
-	spin_lock(&module->kvnodes_lock);
-	list_cut_position(&cleanup_list, &module->kvnodes, module->kvnodes.next);
-	spin_unlock(&module->kvnodes_lock);
+	spin_lock_irqsave(&module->kvnodes_lock, flags);
+	list_cut_position(&cleanup_list, &module->kvnodes, module->kvnodes.prev);
+	spin_unlock_irqrestore(&module->kvnodes_lock, flags);
 
 	list_for_each_entry_safe(node, tmp, &cleanup_list, modlist) {
+		/* TODO: node maybe freed by kvcache_dict_free() */
 		struct kvcache_dict *dict = node->dict;
 
 		BUG_ON(!dict);
@@ -396,7 +403,13 @@ void kvcache_module_nodes_gc(struct lua_module *module)
 		 */
 		kvcache_module_unlink(dict, NULL, node);
 		kvcache_node_drop(node);
+		n += 1;
 	}
+
+	__log_info("module <%s>, kvnodes_count = %d, freed = %d\n",
+			module->name, count, n);
+	WARN_ON(count != n);
+	return n;
 }
 
 void kvcache_dict_free(struct kvcache_dict *dict)

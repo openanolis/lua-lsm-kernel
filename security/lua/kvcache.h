@@ -42,7 +42,7 @@ struct kvcache_dict {
 	RB_HEAD(kvcache, kvcache_node) root;
 };
 
-void kvcache_module_nodes_gc(struct lua_module *module);
+int kvcache_module_nodes_gc(struct lua_module *module);
 void kvcache_dict_free(struct kvcache_dict *dict);
 void kvcache_dict_init(struct kvcache_dict *dict);
 void kvcache_status(int *nalloc, int *nfree);
