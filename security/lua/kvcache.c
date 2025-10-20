@@ -102,7 +102,7 @@ static void kvcache_node_drop(struct kvcache_node *node)
 {
 	if (node == NULL)
 		return;
-	if (refcount_release(&node->refcount))
+	if (refcount_release(&node->refcount) == 0)
 		kvcache_node_free(node);
 }
 

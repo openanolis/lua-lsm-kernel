@@ -114,6 +114,7 @@ extern struct lsm_blob_sizes lua_lsm_blob_sizes;
 
 struct lua_lsm_task {
 	lua_State *L;
+	atomic_t refcount;
 	struct kvcache_dict dict;
 };
 

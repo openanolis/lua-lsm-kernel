@@ -84,22 +84,39 @@ static struct lvm_userdata irq_lvms_ud = {
 
 static DEFINE_PER_CPU(lua_State *, irq_lvms);
 
+static lua_State *lvm_get_from_task(const struct task_struct *task)
+{
+	struct lua_lsm_task *llt = lua_lsm_task(task);
+	int n = refcount_acquire(&llt->refcount);
+	WARN_ON(n != 1);
+	KASSERT(n == 1, ("<%s> Lua VM is reused, refcount = %d\n",
+		task->comm, n));
+	return llt->L;
+}
+
+static void lvm_put_to_task(const struct task_struct *task, lua_State *L)
+{
+	struct lua_lsm_task *llt = lua_lsm_task(task);
+	int n = refcount_release(&llt->refcount);
+	KASSERT(n == 0, ("<%s> Lua VM is reused, refcount = %d\n",
+		task->comm, n));
+	(void)L;
+}
+
 lua_State *lvm_get(void)
 {
 	BUG_ON(in_nmi() || in_hardirq());
 
 	if (in_task())
-		return lua_lsm_task(current)->L;
+		return lvm_get_from_task(current);
 	else
 		return get_cpu_var(irq_lvms);
 }
 
 void lvm_put(lua_State *L)
 {
-	(void)L;
-
 	if (in_task())
-		/* Nothing */;
+		lvm_put_to_task(current, L);
 	else
 		put_cpu_var(irq_lvms);
 }
@@ -694,22 +711,30 @@ int lua_module_unregister(const char *name)
 	/* remove loaded module from every Lua VM */
 	read_lock(&tasklist_lock);
 	for_each_process_thread(g, task) {
-		lua_State *L = lua_lsm_task(task)->L;
+		lua_State *L = lvm_get_from_task(task);
 		/* TODO: may sleep in rwlock critical section */
 		if (lua_module_remove_lvm(L, module))
 			count++;
+		lvm_put_to_task(task, L);
 	}
 	read_unlock(&tasklist_lock);
 
 	/* ditto for the idle 'swapper' tasks */
 	cpus_read_lock();
 	for_each_possible_cpu(cpu) {
+		/* TODO: remove 'swapper' tasks Lua VM */
 		task = idle_task(cpu);
 		if (lua_module_remove_lvm(lua_lsm_task(task)->L, module))
 			count++;
 
+		/*
+		 * Disable softirq to prevent triggered softirq or RCU from
+		 * changing the Lua VM environment.
+		 */
+		local_bh_disable();
 		if (lua_module_remove_lvm(per_cpu(irq_lvms, cpu), module))
 			count++;
+		local_bh_enable();
 	}
 	cpus_read_unlock();
 
@@ -841,6 +866,7 @@ int lua_task_blob_init(struct task_struct *task)
 		return PTR_ERR(L);
 
 	llt->L = L;
+	refcount_init(&llt->refcount, 0);
 	return 0;
 }
 

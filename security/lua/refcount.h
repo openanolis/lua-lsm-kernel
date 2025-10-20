@@ -25,20 +25,19 @@ refcount_init(atomic_t *count, long value)
 	atomic_set(count, value);
 }
 
-static inline void
+static inline int
 refcount_acquire(atomic_t *count)
 {
 	KASSERT(atomic_read(count) < UINT_MAX, ("refcount %p overflowed", count));
-	atomic_inc(count);
+	return atomic_inc_return(count);
 }
 
 static inline int
 refcount_release(atomic_t *count)
 {
-	long n;
-	n = atomic_dec_return(count);
+	int n = atomic_dec_return(count);
 	KASSERT(n >= 0, ("negative refcount %p", count));
-	return (n == 0);
+	return n;
 }
 
 #endif  /* ! _SECURITY_LUA_LSM_REFCOUNT_H */
