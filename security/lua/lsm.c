@@ -284,7 +284,8 @@ static int lua_module_index(lua_State *L)
 	int err;
 
 	/* module queries are always run with a read lock */
-	list_for_each_entry(module, &lsm_modules, list) {
+	list_for_each_entry_srcu(module, &lsm_modules, list,
+				srcu_read_lock_held(&modules_ss)) {
 		if (strcmp(module->name, key) != 0)
 			continue;
 
