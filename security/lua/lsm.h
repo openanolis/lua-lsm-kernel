@@ -70,6 +70,7 @@ struct lua_module {
 	int nhooks;
 	char *chunk;
 	size_t chunk_len;
+	atomic_t loaded_count;
 	struct list_head shdicts;
 	spinlock_t shdict_lock;
 	atomic_t shdict_count;

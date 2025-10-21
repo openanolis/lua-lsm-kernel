@@ -300,6 +300,8 @@ static int lua_module_index(lua_State *L)
 		lua_pushvalue(L, -2);
 		/* stack: [table, thunk, key, thunk] */
 		lua_rawset(L, 1);		/* table[key] = thunk */
+
+		atomic_inc(&module->loaded_count);
 		return 1;			/* return the thunk */
 	}
 
@@ -340,6 +342,7 @@ static int ll_require(lua_State *L)
 
 static atomic_t vm_nalloc = ATOMIC_INIT(0);
 static atomic_t vm_nfree = ATOMIC_INIT(0);
+static atomic_t vm_inuse = ATOMIC_INIT(0);
 static atomic_t mem_nalloc = ATOMIC_INIT(0);
 static atomic_t mem_nrealloc = ATOMIC_INIT(0);
 static atomic_t mem_nfree = ATOMIC_INIT(0);
@@ -439,6 +442,7 @@ static lua_State *lua_state_alloc(struct lvm_userdata *args)
 	}
 
 	atomic_inc(&vm_nalloc);
+	atomic_inc(&vm_inuse);
 	return L;
 }
 
@@ -446,6 +450,7 @@ static void lua_state_free(lua_State *L)
 {
 	if (L) {
 		atomic_inc(&vm_nfree);
+		atomic_dec(&vm_inuse);
 		lua_close(L);
 	}
 }
@@ -720,6 +725,8 @@ int lua_module_unregister(const char *name)
 	}
 	read_unlock(&tasklist_lock);
 
+	__log_info("Prepare to unregister module <%s> from swapper\n", name);
+
 	/* ditto for the idle 'swapper' tasks */
 	cpus_read_lock();
 	for_each_possible_cpu(cpu) {
@@ -739,8 +746,9 @@ int lua_module_unregister(const char *name)
 	}
 	cpus_read_unlock();
 
-	pr_info("Unregistered module <%s> from %d/%d Lua VMs.\n",
-		name, count, atomic_read(&vm_nalloc) - atomic_read(&vm_nfree));
+	pr_info("Unregistered module <%s> from %d/%d Lua VMs, freed = %d.\n",
+		name, atomic_read(&module->loaded_count),
+		atomic_read(&vm_inuse), count);
 
 	lua_module_free(module);
 	return 0;
