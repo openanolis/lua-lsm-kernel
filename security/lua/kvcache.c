@@ -409,6 +409,7 @@ int kvcache_module_nodes_gc(struct lua_module *module)
 	__log_info("module <%s>, kvnodes_count = %d, freed = %d\n",
 			module->name, count, n);
 	WARN_ON(count != n);
+	atomic_set(&module->kvnodes_count, count - n);
 	return n;
 }
 

@@ -20,7 +20,7 @@ extern bool debug;
 	do {								\
 		if (debug)						\
 			pr_ ## level("%s [%d]: %d %s - " fmt,		\
-				current->comm, task_pid_vnr(current),	\
+				current->comm, task_pid_nr(current),	\
 				__LINE__, __func__, ##__VA_ARGS__);	\
 	} while (0)
 
