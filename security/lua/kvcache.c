@@ -141,8 +141,9 @@ kvcache_module_link(struct kvcache_dict *dict,
 	} else {
 		atomic_inc(&dict->count);
 		if (module) {
+			WARN_ON(module->state != LMS_STATE_LIVE);
 			spin_lock(&module->kvnodes_lock);
-			list_add_tail(&node->modlist, &module->kvnodes);
+			list_add_tail_rcu(&node->modlist, &module->kvnodes);
 			atomic_inc(&module->kvnodes_count);
 			spin_unlock(&module->kvnodes_lock);
 		}
@@ -161,7 +162,7 @@ kvcache_module_unlink_unlocked(struct kvcache_dict *dict,
 	atomic_dec(&dict->count);
 	if (module) {
 		spin_lock(&module->kvnodes_lock);
-		list_del(&node->modlist);
+		list_del_rcu(&node->modlist);
 		atomic_dec(&module->kvnodes_count);
 		spin_unlock(&module->kvnodes_lock);
 	}
@@ -378,34 +379,38 @@ update:
 	return 1;
 }
 
+/*
+ * Currently, there's no efficient RCU read-side traversal solution for
+ * rbtree. Therefore, a spinlock is used to synchronize the release of
+ * kvcache_nodes along the following two paths:
+ *   - Release the entire kvnodes list when the module is released
+ *   - Release the entire kvcache_dict when the kernel object is released
+ */
+static DEFINE_SPINLOCK(nodes_gc_lock);
+
 int kvcache_module_nodes_gc(struct lua_module *module)
 {
-	struct list_head cleanup_list;
 	struct kvcache_node *node, *tmp;
-	unsigned long flags;
 	int count, n = 0;
 
-	count = atomic_read(&module->kvnodes_count);
-
-	INIT_LIST_HEAD(&cleanup_list);
-	spin_lock_irqsave(&module->kvnodes_lock, flags);
-	list_cut_position(&cleanup_list, &module->kvnodes, module->kvnodes.prev);
-	spin_unlock_irqrestore(&module->kvnodes_lock, flags);
-
-	list_for_each_entry_safe(node, tmp, &cleanup_list, modlist) {
-		/* TODO: node maybe freed by kvcache_dict_free() */
+	spin_lock_bh(&nodes_gc_lock);
+	list_for_each_entry(node, &module->kvnodes, modlist) {
 		struct kvcache_dict *dict = node->dict;
-
 		BUG_ON(!dict);
 		/*
 		 * module is set to NULL, so there is no need to remove
 		 * node from the module kvnodes queue.
 		 */
 		kvcache_module_unlink(dict, NULL, node);
+	}
+	spin_unlock_bh(&nodes_gc_lock);
+
+	list_for_each_entry_safe(node, tmp, &module->kvnodes, modlist) {
 		kvcache_node_drop(node);
 		n += 1;
 	}
 
+	count = atomic_read(&module->kvnodes_count);
 	__log_info("module <%s>, kvnodes_count = %d, freed = %d\n",
 			module->name, count, n);
 	WARN_ON(count != n);
@@ -416,22 +421,25 @@ int kvcache_module_nodes_gc(struct lua_module *module)
 void kvcache_dict_free(struct kvcache_dict *dict)
 {
 	struct kvcache_node *node, *n;
-	unsigned long flags;
+	struct lua_module *module;
 
-	/*
-	 * Avoid being called in softirq, such as the LSM function
-	 * inode_free_security_rcu will run in the RCU softirq context,
-	 * socket_sock_rcv_skb maybe run in the NET_RX softirq to
-	 * receive data, and file_free_security maybe run in the worker
-	 * thread to delay release the file object via delayed_fput.
-	 */
-	write_lock_irqsave(&dict->lock, flags);
+	spin_lock_bh(&nodes_gc_lock);
+	RB_FOREACH(node, kvcache, &dict->root) {
+		module = node->module;
+		if (module) {
+			spin_lock(&module->kvnodes_lock);
+			list_del_rcu(&node->modlist);
+			atomic_dec(&module->kvnodes_count);
+			spin_unlock(&module->kvnodes_lock);
+		}
+	}
+	spin_unlock_bh(&nodes_gc_lock);
+
 	RB_FOREACH_SAFE(node, kvcache, &dict->root, n) {
-		kvcache_module_unlink_unlocked(dict, node->module, node);
+		kvcache_module_unlink_unlocked(dict, NULL, node);
 		kvcache_node_drop(node);
 	}
 	WARN_ON(atomic_read(&dict->count) != 0);
-	write_unlock_irqrestore(&dict->lock, flags);
 }
 
 void kvcache_dict_init(struct kvcache_dict *dict)
