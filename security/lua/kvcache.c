@@ -405,16 +405,17 @@ int kvcache_module_nodes_gc(struct lua_module *module)
 	}
 	spin_unlock_bh(&nodes_gc_lock);
 
+	count = atomic_read(&module->kvnodes_count);
 	list_for_each_entry_safe(node, tmp, &module->kvnodes, modlist) {
+		list_del(&node->modlist);
+		atomic_dec(&module->kvnodes_count);
 		kvcache_node_drop(node);
 		n += 1;
 	}
 
-	count = atomic_read(&module->kvnodes_count);
 	__log_info("module <%s>, kvnodes_count = %d, freed = %d\n",
 			module->name, count, n);
 	WARN_ON(count != n);
-	atomic_set(&module->kvnodes_count, count - n);
 	return n;
 }
 

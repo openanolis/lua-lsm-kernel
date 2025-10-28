@@ -834,6 +834,7 @@ int lua_module_unregister(const char *name)
 		list_del(&shdict->list);
 		kvcache_dict_free(&shdict->dict);
 		kfree(shdict);
+		atomic_dec(&module->shdict_count);
 	}
 
 	kvcache_module_nodes_gc(module);
@@ -886,7 +887,7 @@ int lua_module_unregister(const char *name)
 
 	nloaded = atomic_read(&module->nloaded);
 	if (count < nloaded && nbusy > 0) {
-		for (i = 1; i <= 10; i++) {
+		for (i = 1; i <= 5; i++) {
 			count += tasks_lvm_remove_module(module, &nbusy);
 			WARN_ON(count > nloaded);
 
@@ -897,7 +898,7 @@ int lua_module_unregister(const char *name)
 			if (count == nloaded || nbusy == 0)
 				break;
 
-			msleep(200 * i);
+			msleep(500 * i);
 
 			nloaded = atomic_read(&module->nloaded);
 			if (count == nloaded)
@@ -905,12 +906,11 @@ int lua_module_unregister(const char *name)
 		}
 	}
 
-	if (count == nloaded) {
+	if (atomic_sub_return(count, &module->nloaded) == 0) {
 		list_del_rcu(&module->list);
 		lua_module_free(module);
 		err = 0;
 	} else {
-		atomic_set(&module->nloaded, nloaded - count);
 		module->state = LMS_STATE_ZOMBIE;
 		err = -EBUSY;
 	}
