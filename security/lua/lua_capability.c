@@ -154,7 +154,8 @@ static int capability_cap_full(lua_State *L)
 static int capability_capable(lua_State *L)
 {
 	int cap = luaL_checkinteger(L, 1);
-	lua_pushboolean(L, capable(cap));
+	int err = cap_capable(current_cred(), &init_user_ns, cap, CAP_OPT_NONE);
+	lua_pushboolean(L, err == 0);
 	return 1;
 }
 
