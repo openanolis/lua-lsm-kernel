@@ -107,18 +107,6 @@ int lua_lsm_status_show(struct seq_file *m, void *v);
 int lsmhook_stat_show(struct seq_file *m, void *v);
 #endif
 
-static inline gfp_t lua_lsm_gfp(void)
-{
-	/*
-	 * Sleeping function is not allowed in atomic, rcu and
-	 * softirq context.
-	 */
-	if (in_atomic() || rcu_preempt_depth() > 0)
-		return GFP_ATOMIC;
-	else
-		return GFP_NOFS;
-}
-
 extern struct lsm_blob_sizes lua_lsm_blob_sizes;
 
 struct lua_lsm_task {

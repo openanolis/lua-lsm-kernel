@@ -130,10 +130,98 @@ static int fs_inode_size(lua_State *L)
 	return 1;
 }
 
+/*
+ * file_type = inode:fmt()
+ * bool = inode:fmt('sock')
+ */
+static int fs_inode_fmt(lua_State *L)
+{
+	static const struct cflag_opt opts[] = {
+		{ "sock",	S_IFSOCK	},
+		{ "lnk",	S_IFLNK		},
+		{ "reg",	S_IFREG		},
+		{ "blk",	S_IFBLK		},
+		{ "dir",	S_IFDIR		},
+		{ "chr",	S_IFCHR		},
+		{ "fifo",	S_IFIFO		},
+		{ NULL,	0 }
+	};
+	struct inode *inode = toinode(L, 1);
+	int top = lua_gettop(L);
+	int i;
+	if (top == 1) {
+		for (i = 0; opts[i].name; i++) {
+			if ((inode->i_mode & S_IFMT) != opts[i].flag)
+				continue;
+			lua_pushstring(L, opts[i].name);
+			return 1;
+		}
+	} else if (top == 2) {
+		const char *s = luaL_checkstring(L, 2);
+		for (i = 0; opts[i].name; i++) {
+			if (strcasecmp(s, opts[i].name) != 0)
+				continue;
+			lua_pushboolean(L,
+				(inode->i_mode & S_IFMT) == opts[i].flag);
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * permissions_table = inode:mode()
+ * bool = inode:mode('suid')
+ * bool = inode:mode(true, 'suid', 'xgrp', 'xoth')
+ */
+static int fs_inode_mode(lua_State *L)
+{
+	static const struct cflag_opt opts[] = {
+		{ "suid",	S_ISUID		},
+		{ "sgid",	S_ISGID		},
+		{ "vtx",	S_ISVTX		},
+		{ "rusr",	S_IRUSR		},
+		{ "wusr",	S_IWUSR		},
+		{ "xusr",	S_IXUSR		},
+		{ "rgrp",	S_IRGRP		},
+		{ "wgrp",	S_IWGRP		},
+		{ "xgrp",	S_IXGRP		},
+		{ "roth",	S_IROTH		},
+		{ "woth",	S_IWOTH		},
+		{ "xoth",	S_IXOTH		},
+		{ NULL,	0 }
+	};
+	struct inode *inode = toinode(L, 1);
+	int top = lua_gettop(L);
+	if (top >= 2) {
+		int start = (top == 2) ? 2 : 3;
+		int and = lua_isboolean(L, 2) && lua_toboolean(L, 2);
+		unsigned int flags = tocflags(L, start, top, opts, 0);
+		unsigned int res = inode->i_mode & flags;
+		lua_pushboolean(L, and ? res == flags : (int)res);
+		return 1;
+	} else if (top == 1) {
+		table_fromopts(L, opts, 0, (unsigned int)inode->i_mode);
+		return 1;
+	}
+	return 0;
+}
+
+static int fs_inode_ids(lua_State *L)
+{
+	struct inode *inode = toinode(L, 1);
+	lua_pushinteger(L, inode->i_uid.val);
+	lua_pushinteger(L, inode->i_gid.val);
+	return 2;
+}
+
 static const luaL_Reg fs_inode_meth[] = {
 	{ "ino",	fs_inode_ino	},
 	{ "xattr",	fs_inode_xattr	},
 	{ "size",	fs_inode_size	},
+	{ "fmt",	fs_inode_fmt	},
+	{ "mode",	fs_inode_mode	},
+	{ "ids",	fs_inode_ids	},
 	{ NULL, NULL }
 };
 
@@ -149,15 +237,7 @@ static int fs_file_fput(lua_State *L)
 static int fs_file_path(lua_State *L)
 {
 	struct file *file = tofile(L, 1);
-	char buffer[FS_PATH_LEN];
-	char *path = file_path(file, buffer, sizeof(buffer));
-	if (IS_ERR(path)) {
-		lua_pushnil(L);
-		lua_pushinteger(L, PTR_ERR(path));
-		return 2;
-	}
-	lua_pushstring(L, path);
-	return 1;
+	return aux_file_path(L, file);
 }
 
 static int fs_file_dentry(lua_State *L)

@@ -101,8 +101,8 @@ static int kernel_cred_cap_ambient(lua_State *L)
 static int kernel_cred_securebits(lua_State *L)
 {
 	static const struct cflag_opt opts[] = {
-		{ "noroot",				SECBIT_NOROOT			},
-		{ "no_setuid_fixup",		SECBIT_NO_SETUID_FIXUP	},
+		{ "noroot",			SECBIT_NOROOT			},
+		{ "no_setuid_fixup",		SECBIT_NO_SETUID_FIXUP		},
 		{ "keep_caps",			SECBIT_KEEP_CAPS		},
 		{ "no_cap_ambient_raise",	SECBIT_NO_CAP_AMBIENT_RAISE	},
 		{ "exec_restrict_file",		SECBIT_EXEC_RESTRICT_FILE	},
@@ -219,7 +219,37 @@ static int kernel_task_exe_file(lua_State *L)
 	struct file *exe_file = get_task_exe_file(task);
 	if (exe_file == NULL)
 		return 0;
+	/* XXX: fput() must be called after use. */
 	*newfile(L) = exe_file;
+	return 1;
+}
+
+static int kernel_task_exepath(lua_State *L)
+{
+	struct task_struct *task = totask(L, 1);
+	struct file *file;
+	int nres = 0;
+	if (task == current) {
+		struct mm_struct *mm = current->mm;
+		if (!mm)
+			return 0;
+		file = get_mm_exe_file(mm);
+	} else {
+		file = get_task_exe_file(task);
+	}
+	if (file) {
+		nres = aux_file_path(L, file);
+		fput(file);
+	}
+	return nres;
+}
+
+static int kernel_task_cmdline(lua_State *L)
+{
+	struct task_struct *task = totask(L, 1);
+	char *cmdline = kstrdup_quotable_cmdline(task, lua_lsm_gfp());
+	lua_pushstring(L, cmdline);
+	kfree(cmdline);
 	return 1;
 }
 
@@ -234,6 +264,8 @@ static const luaL_Reg task_meth[] = {
 	{ "ptrace_parent",		kernel_task_ptrace_parent	},
 	{ "is_idle",			kernel_task_is_idle		},
 	{ "exe_file",			kernel_task_exe_file		},
+	{ "exepath",			kernel_task_exepath		},
+	{ "cmdline",			kernel_task_cmdline		},
 	{ NULL, NULL }
 };
 

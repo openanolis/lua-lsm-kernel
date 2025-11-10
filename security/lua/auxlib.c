@@ -10,6 +10,7 @@
 #include "debug.h"
 #include <linux/bitops.h>
 #include <linux/slab.h>
+#include <linux/fs.h>
 #include <linux/string.h>
 #include <linux/lua.h>
 #include <linux/lauxlib.h>
@@ -299,4 +300,34 @@ void setconst(lua_State *L, const struct const_value *cv)
 		lua_pushnumber(L, cv->value);
 		lua_settable(L, -3);
 	}
+}
+
+int aux_file_path(lua_State *L, struct file *filp)
+{
+	char buffer[256];
+	char *buf = NULL;
+	char *path;
+	int nres;
+
+	path = file_path(filp, buffer, sizeof(buffer));
+	if (IS_ERR(path)) {
+		char *buf = kmalloc(PATH_MAX, lua_lsm_gfp());
+		if (!buf) {
+			lua_pushnil(L);
+			lua_pushinteger(L, -ENOMEM);
+			return 2;
+		}
+		path = file_path(filp, buf, PATH_MAX);
+	}
+	if (IS_ERR(path)) {
+		lua_pushnil(L);
+		lua_pushinteger(L, PTR_ERR(path));
+		nres = 2;
+	} else {
+		lua_pushstring(L, path);
+		nres = 1;
+	}
+	if (buf)
+		kfree(buf);
+	return nres;
 }

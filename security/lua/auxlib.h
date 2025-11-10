@@ -11,6 +11,17 @@
 #include <linux/lua.h>
 #include <linux/lauxlib.h>
 
+static inline gfp_t lua_lsm_gfp(void)
+{
+	/*
+	 * Sleeping function is not allowed in atomic, rcu and
+	 * softirq context.
+	 */
+	if (in_atomic() || rcu_preempt_depth() > 0)
+		return GFP_ATOMIC;
+	else
+		return GFP_NOFS;
+}
 
 #define luaL_newlibtable(L, l)						\
 	(lua_createtable((L), 0, sizeof((l)) / sizeof(*(l)) - 1))
@@ -62,5 +73,7 @@ struct const_value {
 #define CONST_DEFINE(name)	{ #name, name }
 
 void setconst(lua_State *L, const struct const_value *cv);
+
+int aux_file_path(lua_State *L, struct file *filp);
 
 #endif /* ! _SECURITY_LUA_LSM_AUXLIB_H */
