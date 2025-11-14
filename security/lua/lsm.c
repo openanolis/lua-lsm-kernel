@@ -930,16 +930,19 @@ int modules_show(struct seq_file *m, void *v)
 	int idx;
 
 	seq_printf(m, "modules for lua-lsm\n");
-	seq_printf(m, "%-12s %-10s %6s %6s  %-48s\n",
-		"name", "license", "size", "nhooks", "author");
+	seq_printf(m, "%-12s %-10s %6s %4s %5s %6s %6s %-34s\n",
+		"name", "license", "size", "nlsm",
+		"nload", "shdict", "kvnode", "author");
 	seq_printf(m, "%s\n", TABLINE);
 
 	idx = srcu_read_lock(&modules_ss);
 	list_for_each_entry_srcu(module, &lsm_modules, list,
 				srcu_read_lock_held(&modules_ss)) {
-		seq_printf(m, "%-12s %-10s %6zu %6d  %-48s\n",
+		seq_printf(m, "%-12s %-10s %6zu %4d %5d %6d %6d %-34s\n",
 			module->name, module->license, module->chunk_len,
-			module->nhooks, module->author);
+			module->nhooks, atomic_read(&module->nloaded),
+			atomic_read(&module->shdict_count),
+			atomic_read(&module->kvnodes_count), module->author);
 	}
 	srcu_read_unlock(&modules_ss, idx);
 	return 0;
@@ -1012,15 +1015,15 @@ int lsmhook_stat_show(struct seq_file *m, void *v)
 	int i = 1;
 
 	seq_printf(m, "stats for lua-lsm (ns)\n");
-	seq_printf(m, "%3s %-28s %6s %8s %15s %10s %12s\n",
-		"num", "name", "nhooks", "count", "total", "average", "maxtime");
+	seq_printf(m, "%3s %-28s %4s %12s %15s %10s %12s\n",
+		"num", "name", "nlsm", "count", "total", "average", "maxtime");
 	seq_printf(m, "%s\n", TABLINE);
 
 	for (stat = lua_lsm_hook_stats; stat->name; stat++) {
 		int n = atomic_read(&stat->count);
 		s64 total = atomic64_read(&stat->time);
 		s64 maxtime = atomic64_read(&stat->maxtime);
-		seq_printf(m, "%3d %-28s %6d %8d %15llu %10llu %12llu\n",
+		seq_printf(m, "%3d %-28s %4d %12d %15llu %10llu %12llu\n",
 			i++, stat->name, atomic_read(&stat->nhooks),
 			n, total, n ? total / n : 0, maxtime);
 	}

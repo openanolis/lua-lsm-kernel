@@ -91,8 +91,9 @@ extern struct list_head lsm_modules;
 extern struct srcu_struct modules_ss;
 
 
-#define TABLINE	"--------------------------------------------"		\
-		"--------------------------------------------"
+#define TABLINE							\
+	"---------------------------------------------"		\
+	"---------------------------------------------"
 
 lua_State *lvm_get(void);
 void lvm_put(lua_State *L);
