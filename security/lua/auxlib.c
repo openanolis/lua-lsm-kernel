@@ -12,6 +12,7 @@
 #include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/string.h>
+#include <linux/errname.h>
 #include <linux/lua.h>
 #include <linux/lauxlib.h>
 #include <linux/lualib.h>
@@ -309,19 +310,67 @@ int aux_file_path(lua_State *L, struct file *filp)
 	char *path;
 	int nres;
 
+	if (unlikely(!filp || !current->fs)) {
+		lua_pushnil(L);
+		lua_pushstring(L, errname(-ESRCH));
+		return 2;
+	}
+
+	if (unlikely(filp->f_path.dentry == NULL)) {
+		lua_pushnil(L);
+		lua_pushstring(L, errname(-ENOENT));
+		return 2;
+	}
+
 	path = file_path(filp, buffer, sizeof(buffer));
-	if (IS_ERR(path)) {
-		char *buf = kmalloc(PATH_MAX, lua_lsm_gfp());
-		if (!buf) {
+	if (PTR_ERR(path) == -ENAMETOOLONG) {
+		buf = kmalloc(PATH_MAX, lua_lsm_gfp());
+		if (buf == NULL) {
 			lua_pushnil(L);
-			lua_pushinteger(L, -ENOMEM);
+			lua_pushstring(L, errname(-ENOMEM));
 			return 2;
 		}
 		path = file_path(filp, buf, PATH_MAX);
 	}
 	if (IS_ERR(path)) {
 		lua_pushnil(L);
-		lua_pushinteger(L, PTR_ERR(path));
+		lua_pushstring(L, errname(PTR_ERR(path)));
+		nres = 2;
+	} else {
+		lua_pushstring(L, path);
+		nres = 1;
+	}
+	if (buf)
+		kfree(buf);
+	return nres;
+}
+
+int aux_dentry_path(lua_State *L, struct dentry *dentry, int rawpath)
+{
+	char buffer[256];
+	char *buf = NULL;
+	char *path;
+	int nres;
+
+	if (rawpath)
+		path = dentry_path_raw(dentry, buffer, sizeof(buffer));
+	else
+		path = dentry_path(dentry, buffer, sizeof(buffer));
+	if (PTR_ERR(path) == -ENAMETOOLONG) {
+		buf = kmalloc(PATH_MAX, lua_lsm_gfp());
+		if (buf == NULL) {
+			lua_pushnil(L);
+			lua_pushstring(L, errname(-ENOMEM));
+			return 2;
+		}
+		if (rawpath)
+			path = dentry_path_raw(dentry, buf, PATH_MAX);
+		else
+			path = dentry_path(dentry, buf, PATH_MAX);
+	}
+	if (IS_ERR(path)) {
+		lua_pushnil(L);
+		lua_pushstring(L, errname(PTR_ERR(path)));
 		nres = 2;
 	} else {
 		lua_pushstring(L, path);

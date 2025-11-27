@@ -18,7 +18,6 @@
 #include "kvcache.h"
 #include "lua_object.h"
 
-#define FS_PATH_LEN    256
 
 /********************************** util **********************************/
 
@@ -73,22 +72,6 @@ static int fs_dentry_backing_inode(lua_State *L)
 	return 1;
 }
 
-static int fs_dentry_path(lua_State *L)
-{
-	struct dentry *dentry = todentry(L, 1);
-	int use_path = lua_toboolean(L, 2);
-	char buffer[FS_PATH_LEN];
-	char *path;
-	if (use_path)
-		path = dentry_path(dentry, buffer, sizeof(buffer));
-	else
-		path = dentry_path_raw(dentry, buffer, sizeof(buffer));
-	if (path == NULL)
-		return 0;
-	lua_pushstring(L, path);
-	return 1;
-}
-
 static int fs_dentry_xattr(lua_State *L)
 {
 	struct dentry *dentry = todentry(L, 1);
@@ -97,12 +80,31 @@ static int fs_dentry_xattr(lua_State *L)
 	return fs_xattr(L, dentry, inode, name);
 }
 
+static int fs_dentry_path(lua_State *L)
+{
+	struct dentry *dentry = todentry(L, 1);
+	int rawpath = lua_toboolean(L, 2);
+	return aux_dentry_path(L, dentry, rawpath);
+}
+
+static int meth_dentry_tostring(lua_State *L)
+{
+	struct dentry *dentry = todentry(L, 1);
+	int nres = aux_dentry_path(L, dentry, 0);
+	if (nres == 2)
+		lua_pushfstring(L, "dentry <err = %s>", lua_tostring(L, -1));
+	else
+		lua_pushfstring(L, "dentry '%s'", lua_tostring(L, -1));
+	return 1;
+}
+
 static const luaL_Reg fs_dentry_meth[] = {
 	{ "dget",		fs_dentry_dget		},
 	{ "dput",		fs_dentry_dput		},
 	{ "backing_inode",	fs_dentry_backing_inode	},
-	{ "path",		fs_dentry_path		},
 	{ "xattr",		fs_dentry_xattr		},
+	{ "path",		fs_dentry_path		},
+	{ "__tostring",		meth_dentry_tostring	},
 	{ NULL, NULL }
 };
 
@@ -131,10 +133,10 @@ static int fs_inode_size(lua_State *L)
 }
 
 /*
- * file_type = inode:fmt()
- * bool = inode:fmt('sock')
+ * ftype = inode:filetype()
+ * bool = inode:filetype('sock')
  */
-static int fs_inode_fmt(lua_State *L)
+static int fs_inode_filetype(lua_State *L)
 {
 	static const struct cflag_opt opts[] = {
 		{ "sock",	S_IFSOCK	},
@@ -215,13 +217,23 @@ static int fs_inode_ids(lua_State *L)
 	return 2;
 }
 
+static int meth_inode_tostring(lua_State *L)
+{
+	struct inode *inode = toinode(L, 1);
+	char buffer[128];
+	int l = snprintf(buffer, sizeof(buffer), "inode [%lu]", inode->i_ino);
+	lua_pushlstring(L, buffer, l);
+	return 1;
+}
+
 static const luaL_Reg fs_inode_meth[] = {
-	{ "ino",	fs_inode_ino	},
-	{ "xattr",	fs_inode_xattr	},
-	{ "size",	fs_inode_size	},
-	{ "fmt",	fs_inode_fmt	},
-	{ "mode",	fs_inode_mode	},
-	{ "ids",	fs_inode_ids	},
+	{ "ino",	fs_inode_ino		},
+	{ "xattr",	fs_inode_xattr		},
+	{ "size",	fs_inode_size		},
+	{ "filetype",	fs_inode_filetype	},
+	{ "mode",	fs_inode_mode		},
+	{ "ids",	fs_inode_ids		},
+	{ "__tostring",	meth_inode_tostring	},
 	{ NULL, NULL }
 };
 
@@ -232,12 +244,6 @@ static int fs_file_fput(lua_State *L)
 	struct file *file = tofile(L, 1);
 	fput(file);
 	return 0;
-}
-
-static int fs_file_path(lua_State *L)
-{
-	struct file *file = tofile(L, 1);
-	return aux_file_path(L, file);
 }
 
 static int fs_file_dentry(lua_State *L)
@@ -303,14 +309,32 @@ static int fs_file_fmode(lua_State *L)
 	return 0;
 }
 
+static int fs_file_path(lua_State *L)
+{
+	struct file *file = tofile(L, 1);
+	return aux_file_path(L, file);
+}
+
+static int meth_file_tostring(lua_State *L)
+{
+	struct file *file = tofile(L, 1);
+	int nres = aux_file_path(L, file);
+	if (nres == 2)
+		lua_pushfstring(L, "file <err = %s>", lua_tostring(L, -1));
+	else
+		lua_pushfstring(L, "file '%s'", lua_tostring(L, -1));
+	return 1;
+}
+
 static const luaL_Reg fs_file_meth[] = {
-	{ "fput",	fs_file_fput	},
-	{ "path",	fs_file_path	},
-	{ "dentry",	fs_file_dentry	},
-	{ "inode",	fs_file_inode	},
-	{ "xattr",	fs_file_xattr	},
-	{ "size",	fs_file_size	},
-	{ "fmode",	fs_file_fmode	},
+	{ "fput",		fs_file_fput		},
+	{ "dentry",		fs_file_dentry		},
+	{ "inode",		fs_file_inode		},
+	{ "xattr",		fs_file_xattr		},
+	{ "size",		fs_file_size		},
+	{ "fmode",		fs_file_fmode		},
+	{ "path",		fs_file_path		},
+	{ "__tostring",		meth_file_tostring	},
 	{ NULL, NULL }
 };
 
@@ -369,10 +393,22 @@ static int fs_path_eq(lua_State *L)
 	return 1;
 }
 
+static int meth_path_tostring(lua_State *L)
+{
+	struct path *path = topath(L, 1);
+	int nres = aux_dentry_path(L, path->dentry, 0);
+	if (nres == 2)
+		lua_pushfstring(L, "path <err = %d>", lua_tostring(L, -1));
+	else
+		lua_pushfstring(L, "path '%s'", lua_tostring(L, -1));
+	return 1;
+}
+
 static const luaL_Reg fs_path_meth[] = {
 	{ "vfsmount",	fs_path_vfsmount	},
 	{ "dentry",	fs_path_dentry		},
 	{ "__eq",	fs_path_eq		},
+	{ "__tostring",	meth_path_tostring	},
 	{ NULL, NULL }
 };
 
@@ -396,7 +432,19 @@ static int fs_superblock_root(lua_State *L)
 static int fs_superblock_fstype_name(lua_State *L)
 {
 	struct super_block *sb = tosuperblock(L, 1);
-	lua_pushstring(L, sb->s_type->name);
+	struct file_system_type *type = sb->s_type;
+	if (type)
+		lua_pushstring(L, type->name);
+	else
+		lua_pushnil(L);
+	return 1;
+}
+
+static int meth_superblock_tostring(lua_State *L)
+{
+	struct super_block *sb = tosuperblock(L, 1);
+	struct file_system_type *type = sb->s_type;
+	lua_pushfstring(L, "superblock '%s'", type ? type->name : "<empty>");
 	return 1;
 }
 
@@ -404,6 +452,7 @@ static const luaL_Reg fs_superblock_meth[] = {
 	{ "magic",		fs_superblock_magic		},
 	{ "root",		fs_superblock_root		},
 	{ "fstype_name",	fs_superblock_fstype_name	},
+	{ "__tostring",		meth_superblock_tostring	},
 	{ NULL, NULL }
 };
 

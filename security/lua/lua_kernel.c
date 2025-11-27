@@ -253,6 +253,13 @@ static int kernel_task_cmdline(lua_State *L)
 	return 1;
 }
 
+static int meth_task_tostring(lua_State *L)
+{
+	struct task_struct *task = totask(L, 1);
+	lua_pushfstring(L, "task '%s'", task->comm);
+    return 1;
+}
+
 static const luaL_Reg task_meth[] = {
 	{ "pids",			kernel_task_pids		},
 	{ "cred",			kernel_task_cred		},
@@ -266,6 +273,7 @@ static const luaL_Reg task_meth[] = {
 	{ "exe_file",			kernel_task_exe_file		},
 	{ "exepath",			kernel_task_exepath		},
 	{ "cmdline",			kernel_task_cmdline		},
+	{ "__tostring",			meth_task_tostring		},
 	{ NULL, NULL }
 };
 

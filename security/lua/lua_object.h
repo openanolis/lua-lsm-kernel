@@ -66,8 +66,9 @@
 			{ "__tostring",		class ## _ ## name ## _tostring		},	\
 			{ NULL, NULL }								\
 		};										\
-		createmeta(L, METHOD_NAME(class, name), funcs, 0, 0);				\
-		luaL_register(L, NULL, object_meth);						\
+		createmeta(L, METHOD_NAME(class, name), object_meth, 0, 0);			\
+		if (funcs)									\
+			luaL_register(L, NULL, funcs);						\
 		lua_pop(L, 1);									\
 	}
 
@@ -76,9 +77,11 @@
 	static inline void create_ ## name ## _meta(lua_State *L,				\
 						const luaL_Reg *funcs)				\
 	{											\
-		createmeta(L, METHOD_NAME(class, name), funcs, 1, 0);				\
+		createmeta(L, METHOD_NAME(class, name), NULL, 1, 0);				\
 		lua_pushcfunction(L, class ## _ ## name ## _tostring);				\
 		lua_setfield(L, -2, "__tostring");	/* mt.__tostring = func */		\
+		if (funcs)									\
+			luaL_register(L, NULL, funcs);						\
 		lua_pop(L, 1);									\
 	}
 
