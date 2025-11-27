@@ -181,11 +181,6 @@ static int init_file(struct file *f, int flags, const struct cred *cred)
 	int error;
 
 	f->f_cred = get_cred(cred);
-	error = security_file_alloc(f);
-	if (unlikely(error)) {
-		put_cred(f->f_cred);
-		return error;
-	}
 
 	spin_lock_init(&f->f_lock);
 	/*
@@ -227,6 +222,14 @@ static int init_file(struct file *f, int flags, const struct cred *cred)
 	 * refcount bumps we should reinitialize the reused file first.
 	 */
 	file_ref_init(&f->f_ref, 1);
+
+	error = security_file_alloc(f);
+	if (unlikely(error)) {
+		mutex_destroy(&f->f_pos_lock);
+		put_cred(f->f_cred);
+		return error;
+	}
+
 	return 0;
 }
 
