@@ -31,8 +31,8 @@ static inline gfp_t lua_lsm_gfp(void)
 
 /* debug functions */
 
+void lua_table_dump(lua_State *L, int idx, int level, int max);
 void lua_stack_dump(lua_State *L);
-void lua_table_dump(lua_State *L, const char *prefix);
 
 /* aux functions */
 
@@ -61,9 +61,16 @@ void table_fromopts(lua_State *L, const struct cflag_opt *opts,
 		unsigned int bitfield, unsigned int mask);
 
 void **newcptr(lua_State *L, const char *metatable);
-void createmeta(lua_State *L, const char *name,
-		const luaL_Reg *meth, int index, int pop);
+void createmeta(lua_State *L, const char *tname, const char *name,
+		const luaL_Reg *meth, const luaL_Reg *base, int pop);
 void *checkudata(lua_State *L, int ud, const char *name);
+
+void createmeta3(lua_State *L, const char *name, const luaL_Reg *base,
+		const char *tname_gc, const luaL_Reg *funcs_gc,
+		const char *tname, const luaL_Reg *funcs,
+		const char *tname_raw, const luaL_Reg *funcs_raw);
+void *checkudata3(lua_State *L, int ud, const char *tname);
+
 
 struct const_value {
 	const char *name;

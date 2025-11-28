@@ -92,9 +92,9 @@ static int meth_dentry_tostring(lua_State *L)
 	struct dentry *dentry = todentry(L, 1);
 	int nres = aux_dentry_path(L, dentry, 0);
 	if (nres == 2)
-		lua_pushfstring(L, "dentry <err = %s>", lua_tostring(L, -1));
+		lua_pushfstring(L, "dentry: <err = %s>", lua_tostring(L, -1));
 	else
-		lua_pushfstring(L, "dentry '%s'", lua_tostring(L, -1));
+		lua_pushfstring(L, "dentry: '%s'", lua_tostring(L, -1));
 	return 1;
 }
 
@@ -221,7 +221,7 @@ static int meth_inode_tostring(lua_State *L)
 {
 	struct inode *inode = toinode(L, 1);
 	char buffer[128];
-	int l = snprintf(buffer, sizeof(buffer), "inode [%lu]", inode->i_ino);
+	int l = snprintf(buffer, sizeof(buffer), "inode: [%lu]", inode->i_ino);
 	lua_pushlstring(L, buffer, l);
 	return 1;
 }
@@ -320,9 +320,9 @@ static int meth_file_tostring(lua_State *L)
 	struct file *file = tofile(L, 1);
 	int nres = aux_file_path(L, file);
 	if (nres == 2)
-		lua_pushfstring(L, "file <err = %s>", lua_tostring(L, -1));
+		lua_pushfstring(L, "file: <err = %s>", lua_tostring(L, -1));
 	else
-		lua_pushfstring(L, "file '%s'", lua_tostring(L, -1));
+		lua_pushfstring(L, "file: '%s'", lua_tostring(L, -1));
 	return 1;
 }
 
@@ -398,9 +398,9 @@ static int meth_path_tostring(lua_State *L)
 	struct path *path = topath(L, 1);
 	int nres = aux_dentry_path(L, path->dentry, 0);
 	if (nres == 2)
-		lua_pushfstring(L, "path <err = %d>", lua_tostring(L, -1));
+		lua_pushfstring(L, "path: <err = %d>", lua_tostring(L, -1));
 	else
-		lua_pushfstring(L, "path '%s'", lua_tostring(L, -1));
+		lua_pushfstring(L, "path: '%s'", lua_tostring(L, -1));
 	return 1;
 }
 
@@ -444,7 +444,7 @@ static int meth_superblock_tostring(lua_State *L)
 {
 	struct super_block *sb = tosuperblock(L, 1);
 	struct file_system_type *type = sb->s_type;
-	lua_pushfstring(L, "superblock '%s'", type ? type->name : "<empty>");
+	lua_pushfstring(L, "superblock: '%s'", type ? type->name : "<empty>");
 	return 1;
 }
 
@@ -547,15 +547,15 @@ LUALIB_API int luaopen_fs(lua_State *L)
 {
 	luaL_newlib(L, fslib);
 
-	create_dentry_meta(L, fs_dentry_meth);
-	create_inode_meta(L, fs_inode_meth);
-	create_file_meta(L, fs_file_meth);
-	create_binprm_meta(L, fs_binprm_meth);
-	create_path_meta(L, fs_path_meth);
-	create_superblock_meta(L, fs_superblock_meth);
-	create_fscontext_meta(L, fs_fscontext_meth);
-	create_vfsmount_meta(L, fs_vfsmount_meth);
-	create_mntidmap_meta(L, fs_mntidmap_meth);
+	create_dentry_meta(L, fs_dentry_meth, NULL);
+	create_inode_meta(L, fs_inode_meth, NULL);
+	create_file_meta(L, fs_file_meth, NULL);
+	create_binprm_meta(L, fs_binprm_meth, NULL);
+	create_path_meta(L, fs_path_meth, NULL);
+	create_superblock_meta(L, fs_superblock_meth, NULL);
+	create_fscontext_meta(L, fs_fscontext_meth, NULL);
+	create_vfsmount_meta(L, fs_vfsmount_meth, NULL);
+	create_mntidmap_meta(L, fs_mntidmap_meth, NULL);
 
 	return 1;
 }

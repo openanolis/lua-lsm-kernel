@@ -10,20 +10,22 @@
 
 #include "auxlib.h"
 
-#define METHOD_NAME(class, name)	("method." #class "." #name)
+#define METHOD_NAME(name)	("method." #name)
+#define METHOD_NAME_RAW(name)	("method." #name ".raw")
+#define METHOD_NAME_GC(name)	("method." #name ".gc")
 
-#define LUA_OBJECT_DEFINE(class, name, ctype, d)						\
+#define LUA_OBJECT_META_DEFINE(name, ctype, d, metaname)					\
 	static inline ctype *new ## name(lua_State *L)						\
 	{											\
 		ctype *p = (ctype *)lua_newuserdata(L, sizeof(ctype));				\
 		*p = d;										\
-		luaL_getmetatable(L, METHOD_NAME(class, name));					\
+		luaL_getmetatable(L, metaname);							\
 		lua_setmetatable(L, -2);							\
 		return p;									\
 	}											\
 	static inline ctype *to ## name ## p(lua_State *L, int idx)				\
 	{											\
-		return (ctype *)luaL_checkudata(L, idx, METHOD_NAME(class, name));		\
+		return (ctype *)checkudata3(L, idx, metaname);					\
 	}											\
 	static inline ctype to ## name(lua_State *L, int idx)					\
 	{											\
@@ -31,64 +33,73 @@
 	}											\
 	static inline ctype *checkudata_ ## name(lua_State *L, int idx)				\
 	{											\
-		return (ctype *)checkudata(L, idx, METHOD_NAME(class, name));			\
-	}											\
-	static int class ## _ ## name ## _tostring(lua_State *L)				\
-	{											\
-		ctype o = to ## name(L, 1);							\
-		lua_pushfstring(L, #name " (%p)", o);						\
-		return 1;									\
+		return (ctype *)checkudata(L, idx, metaname);					\
 	}
 
-#define LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, method, fname)			\
-	static int class ## _ ## name ## _ ## method(lua_State *L)				\
+#define LUA_OBJECT_KVCACHE_FUNC(name, ctype, blob, method, fname)				\
+	static int rawmeth_ ## name ## _ ## method(lua_State *L)				\
 	{											\
-		ctype p = to ## name(L, 1);							\
+		ctype p = toraw ## name(L, 1);							\
 		struct lua_lsm_ ## blob *ll = lua_lsm_ ## name(p);				\
 		return lua_object_ ## fname(L, &ll->dict);					\
 	}
 
-#define LUA_OBJECT_BLOB_FUNCS_DEFINE(class, name, ctype, d, blob)				\
-	LUA_OBJECT_DEFINE(class, name, ctype, d)						\
-	LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, kvcache_get, get)			\
-	LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, kvcache_incr, incr)			\
-	LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, index, index)				\
-	LUA_OBJECT_KVCACHE_FUNC(class, name, ctype, blob, newindex, newindex)			\
-	static inline void create_ ## name ## _meta(lua_State *L,				\
-						const luaL_Reg *funcs)				\
+#define LUA_OBJECT_TOSTRING_FUNC(name, ctype)							\
+	static int rawmeth_ ## name ## _tostring(lua_State *L)					\
 	{											\
-		static const luaL_Reg object_meth[] = {						\
-			{ "kvcache_set",	class ## _ ## name ## _newindex		},	\
-			{ "kvcache_get",	class ## _ ## name ## _kvcache_get	},	\
-			{ "kvcache_incr",	class ## _ ## name ## _kvcache_incr	},	\
-			{ "__index",		class ## _ ## name ## _index		},	\
-			{ "__newindex",		class ## _ ## name ## _newindex		},	\
-			{ "__tostring",		class ## _ ## name ## _tostring		},	\
+		ctype o = toraw ## name(L, 1);							\
+		lua_pushfstring(L, #name ": <%p>", o);						\
+		return 1;									\
+	}
+
+#define LUA_OBJECT_BLOB_FUNCS_DEFINE(name, ctype, d, blob)					\
+	LUA_OBJECT_META_DEFINE(name, ctype, d, METHOD_NAME(name))				\
+	LUA_OBJECT_META_DEFINE(raw ## name, ctype, d, METHOD_NAME_RAW(name))			\
+	LUA_OBJECT_META_DEFINE(gc ## name, ctype, d, METHOD_NAME_GC(name))			\
+	LUA_OBJECT_KVCACHE_FUNC(name, ctype, blob, kvcache_get, get)				\
+	LUA_OBJECT_KVCACHE_FUNC(name, ctype, blob, kvcache_incr, incr)				\
+	LUA_OBJECT_KVCACHE_FUNC(name, ctype, blob, index, index)				\
+	LUA_OBJECT_KVCACHE_FUNC(name, ctype, blob, newindex, newindex)				\
+	LUA_OBJECT_TOSTRING_FUNC(name, ctype)							\
+	static inline void create_ ## name ## _meta(lua_State *L,				\
+				const luaL_Reg *funcs, const luaL_Reg *gc)			\
+	{											\
+		static const luaL_Reg rawmeths[] = {						\
+			{ "kvcache_set",	rawmeth_ ## name ## _newindex		},	\
+			{ "kvcache_get",	rawmeth_ ## name ## _kvcache_get	},	\
+			{ "kvcache_incr",	rawmeth_ ## name ## _kvcache_incr	},	\
 			{ NULL, NULL }								\
 		};										\
-		createmeta(L, METHOD_NAME(class, name), object_meth, 0, 0);			\
-		if (funcs)									\
-			luaL_register(L, NULL, funcs);						\
-		lua_pop(L, 1);									\
+		static const luaL_Reg basemeths[] = {						\
+			{ "__index",		rawmeth_ ## name ## _index		},	\
+			{ "__newindex",		rawmeth_ ## name ## _newindex		},	\
+			{ "__tostring",		rawmeth_ ## name ## _tostring		},	\
+			{ NULL, NULL }								\
+		};										\
+		createmeta3(L, #name, basemeths, METHOD_NAME_GC(name), gc,			\
+			METHOD_NAME(name), funcs, METHOD_NAME_RAW(name), rawmeths);		\
 	}
 
-#define LUA_OBJECT_func_DEFINE(class, name, ctype, d)						\
-	LUA_OBJECT_DEFINE(class, name, ctype, d)						\
+#define LUA_OBJECT_func_DEFINE(name, ctype, d)							\
+	LUA_OBJECT_META_DEFINE(name, ctype, d, METHOD_NAME(name))				\
+	LUA_OBJECT_META_DEFINE(raw ## name, ctype, d, METHOD_NAME_RAW(name))			\
+	LUA_OBJECT_META_DEFINE(gc ## name, ctype, d, METHOD_NAME_GC(name))			\
+	LUA_OBJECT_TOSTRING_FUNC(name, ctype)							\
 	static inline void create_ ## name ## _meta(lua_State *L,				\
-						const luaL_Reg *funcs)				\
+				const luaL_Reg *funcs, const luaL_Reg *gc)			\
 	{											\
-		createmeta(L, METHOD_NAME(class, name), NULL, 1, 0);				\
-		lua_pushcfunction(L, class ## _ ## name ## _tostring);				\
-		lua_setfield(L, -2, "__tostring");	/* mt.__tostring = func */		\
-		if (funcs)									\
-			luaL_register(L, NULL, funcs);						\
-		lua_pop(L, 1);									\
+		static const luaL_Reg basemeths[] = {						\
+			{ "__tostring",		rawmeth_ ## name ## _tostring	},		\
+			{ NULL, NULL }								\
+		};										\
+		createmeta3(L, #name, basemeths, METHOD_NAME_GC(name), gc,			\
+			METHOD_NAME(name), funcs, METHOD_NAME_RAW(name), NULL);			\
 	}
 
-#define LUA_OBJECT_task_DEFINE(class, name, ctype, d)						\
-	LUA_OBJECT_BLOB_FUNCS_DEFINE(class, name, ctype, d, task)
-#define LUA_OBJECT_object_DEFINE(class, name, ctype, d)						\
-	LUA_OBJECT_BLOB_FUNCS_DEFINE(class, name, ctype, d, object)
+#define LUA_OBJECT_task_DEFINE(name, ctype, d)							\
+	LUA_OBJECT_BLOB_FUNCS_DEFINE(name, ctype, d, task)
+#define LUA_OBJECT_object_DEFINE(name, ctype, d)						\
+	LUA_OBJECT_BLOB_FUNCS_DEFINE(name, ctype, d, object)
 
 
 #define LUA_OBJECTS_LIST									\
@@ -116,7 +127,7 @@
 
 
 #define LUA_OBJECT(blob, class, name, ctype, d)							\
-	LUA_OBJECT_ ## blob ## _DEFINE(class, name, ctype, d)
+	LUA_OBJECT_ ## blob ## _DEFINE(name, ctype, d)
 LUA_OBJECTS_LIST
 #undef LUA_OBJECT
 

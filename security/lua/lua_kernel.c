@@ -256,7 +256,7 @@ static int kernel_task_cmdline(lua_State *L)
 static int meth_task_tostring(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
-	lua_pushfstring(L, "task '%s'", task->comm);
+	lua_pushfstring(L, "task: '%s'", task->comm);
     return 1;
 }
 
@@ -401,12 +401,12 @@ static const luaL_Reg kernellib[] = {
 LUALIB_API int luaopen_kernel(lua_State *L)
 {
 	luaL_newlib(L, kernellib);
-	create_task_meta(L, task_meth);
-	create_cred_meta(L, cred_meth);
-	create_perfevent_meta(L, NULL);
-	create_ipc_meta(L, NULL);
-	create_msgmsg_meta(L, NULL);
-	create_key_meta(L, NULL);
-	create_bdev_meta(L, NULL);
+	create_task_meta(L, task_meth, NULL);
+	create_cred_meta(L, cred_meth, NULL);
+	create_perfevent_meta(L, NULL, NULL);
+	create_ipc_meta(L, NULL, NULL);
+	create_msgmsg_meta(L, NULL, NULL);
+	create_key_meta(L, NULL, NULL);
+	create_bdev_meta(L, NULL, NULL);
 	return 1;
 }

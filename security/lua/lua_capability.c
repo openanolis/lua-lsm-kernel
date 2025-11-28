@@ -169,7 +169,7 @@ static const luaL_Reg capabilitylib[] = {
 int luaopen_capability(lua_State *L)
 {
 	luaL_newlib(L, capabilitylib);
-	create_cap_meta(L, cap_meth);
+	create_cap_meta(L, cap_meth, NULL);
 	setconst(L, capabilities);
 	return 1;
 }

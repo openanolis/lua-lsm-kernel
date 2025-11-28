@@ -342,10 +342,10 @@ LUALIB_API int luaopen_net(lua_State *L)
 {
 	luaL_newlib(L, netlib);
 
-	create_sock_meta(L, sock_meth);
-	create_socket_meta(L, socket_meth);
-	create_skb_meta(L, skb_meth);
-	create_sockaddr_meta(L, sockaddr_meth);
+	create_sock_meta(L, sock_meth, NULL);
+	create_socket_meta(L, socket_meth, NULL);
+	create_skb_meta(L, skb_meth, NULL);
+	create_sockaddr_meta(L, sockaddr_meth, NULL);
 
 	return 1;
 }

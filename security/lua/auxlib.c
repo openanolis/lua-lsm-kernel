@@ -19,54 +19,85 @@
 #include "auxlib.h"
 
 
+void lua_table_dump(lua_State *L, int idx, int level, int max)
+{
+	int i = 1;
+	if (idx < 0)
+		idx = lua_gettop(L) + 1 + idx;
+	if (!lua_istable(L, idx)) {
+		pr_err("%*s    <Not a table, type = %s>\n",
+			level * 4, "", luaL_typename(L, -1));
+		return;
+	}
+	if (level > 10) {
+		pr_err("%*s    <Table nesting is out of scope, level = %d>\n",
+			level * 4, "", level);
+		return;
+	}
+	/* table is in the stack at index 't' */
+	lua_pushnil(L);  /* first key */
+	while (lua_next(L, idx) != 0) {
+		if (max != -1 && i > max) {
+			pr_info("%*s     ... ...\n", level * 4, "");
+			lua_pop(L, 2);
+			break;
+		}
+
+		/* To avoid changing the key in lua_tostring */
+		lua_pushvalue(L, -2);
+		/* stack: [key, value, key2] */
+		switch (lua_type(L, -2)) {
+		case LUA_TTABLE:
+			pr_info("%*s    %2d: [%s] %s\n", level * 4, "", i,
+				luaL_typename(L, -1), lua_tostring(L, -1) ?: "(null)");
+			lua_table_dump(L, -2, level + 1, 5);
+			break;
+		default:
+			/* uses 'key' (at index -2) and 'value' (at index -1) */
+			pr_info("%*s    %2d: [%s] %s\t- [%s] %s\n",
+				level * 4, "", i,
+				luaL_typename(L, -1), lua_tostring(L, -1) ?: "(null)",
+				luaL_typename(L, -2), lua_tostring(L, -2) ?: "(null)");
+			break;
+		}
+
+		/* removes 'value' and 'key2'; keeps 'key' for next iteration */
+		lua_pop(L, 2);
+		i += 1;
+	}
+}
+
 void lua_stack_dump(lua_State *L)
 {
 	int top = lua_gettop(L);
 	int i;
 
-	__log_info("-------- stack dump start --------\n");
 	for (i = 1; i <= top; i++) {
-		int type = lua_type(L, i);
-		const char * __maybe_unused name = lua_typename(L, type);
-
-		if (type == LUA_TSTRING)
-			__log_info("    %2d [%s] %s\n", i, name, lua_tostring(L, i));
-		else
-			__log_info("    %2d [%s]\n", i, name);
+		switch (lua_type(L, i)) {
+		case LUA_TTABLE:
+			pr_info("    %2d: [table]\n", i);
+			lua_table_dump(L, i, 1, 6);
+			break;
+		default:
+			lua_pushvalue(L, i);
+			pr_info("    %2d: [%s] %s\n", i,
+				luaL_typename(L, -1), lua_tostring(L, -1) ?: "(null)");
+			lua_pop(L, 1);
+			break;
+		}
 	}
-	__log_info("-------- stack dump end   --------\n");
-}
-
-void lua_table_dump(lua_State *L, const char *prefix)
-{
-	int i = 1;
-	if (!lua_istable(L, -1)) {
-		__log_err("%s: not a table, type = %s\n",
-			prefix, luaL_typename(L, -1));
-		return;
-	}
-	__log_info("-------- %s: table dump start --------\n", prefix);
-	/* table is in the stack at index 't' */
-	lua_pushnil(L);  /* first key */
-	while (lua_next(L, -2) != 0) {
-		/* uses 'key' (at index -2) and 'value' (at index -1) */
-		__log_info("    %2d: [%s] %s\t- [%s] %s\n", i,
-			luaL_typename(L, -2), lua_tostring(L, -2) ?: "(null)",
-			luaL_typename(L, -1), lua_tostring(L, -1) ?: "(null)");
-		/* removes 'value'; keeps 'key' for next iteration */
-		lua_pop(L, 1);
-		i += 1;
-	}
-	__log_info("-------- %s: table dump end   --------\n", prefix);
 }
 
 /* borrowed from lua.c */
 int lua_traceback(lua_State *L)
 {
-	pr_err("@_@ LuaVM: top = %d\n", lua_gettop(L));
+	pr_err("@_@ LuaVM traceback: %s [%d] Lua stacktop = %d\n",
+		current->comm, task_pid_nr(current), lua_gettop(L));
 	if (!lua_isstring(L, 1))  /* 'message' not a string? */
 		return 1;  /* keep it intact */
 	pr_err("@_@ LuaVM: %s\n", lua_tostring(L, -1));
+
+	/* Lua stack */
 	lua_getfield(L, LUA_GLOBALSINDEX, "debug");
 	if (!lua_istable(L, -1)) {
 		lua_pop(L, 1);
@@ -82,9 +113,10 @@ int lua_traceback(lua_State *L)
 	lua_call(L, 2, 1);  /* call debug.traceback */
 	pr_err("@_@ LuaVM stack:\n%s\n", lua_tostring(L, -1));
 
-	__log_err("------------------ C stack dump start ------------------\n");
+	pr_err("----------------------------------------\n");
+	/* C stack */
 	dump_stack();
-	__log_err("------------------  C stack dump end  ------------------\n");
+	pr_err("----------------------------------------\n");
 	return 1;
 }
 
@@ -263,18 +295,28 @@ void **newcptr(lua_State *L, const char *metatable)
 	return p;
 }
 
-void createmeta(lua_State *L, const char *name,
-		const luaL_Reg *meth, int index, int pop)
+void createmeta(lua_State *L, const char *tname, const char *name,
+		const luaL_Reg *meth, const luaL_Reg *base, int pop)
 {
-	luaL_newmetatable(L, name);
-	lua_pushstring(L, "cannot get a protected metatable");
-	lua_setfield(L, -2, "__metatable");	/* metatable.__metatable = msg */
-	if (index) {
-		lua_pushvalue(L, -1);
-		lua_setfield(L, -2, "__index");	/* metatable.__index = metatable */
+	luaL_newmetatable(L, tname);
+	/* metatable.__metatable = error_message */
+	lua_pushstring(L, "cannot set a protected metatable");
+	lua_setfield(L, -2, "__metatable");
+	if (name) {
+		/* metatable.__name = name */
+		lua_pushstring(L, name);
+		lua_setfield(L, -2, "__name");
 	}
+
+	/* metatable.__index = metatable */
+	lua_pushvalue(L, -1);
+	lua_setfield(L, -2, "__index");
+	if (base)
+		luaL_register(L, NULL, base);
+
 	if (meth)
 		luaL_register(L, NULL, meth);
+
 	if (pop)
 		lua_pop(L, 1);
 }
@@ -291,6 +333,51 @@ void *checkudata(lua_State *L, int ud, const char *name)
 			}
 		}
 	}
+	return NULL;
+}
+
+/*
+ *           meta           meta
+ * [ [ gc ] ------> regular ] ------> raw
+ */
+void createmeta3(lua_State *L, const char *name, const luaL_Reg *base,
+		const char *tname_gc, const luaL_Reg *funcs_gc,
+		const char *tname, const luaL_Reg *funcs,
+		const char *tname_raw, const luaL_Reg *funcs_raw)
+{
+	if (funcs_gc && funcs)
+		createmeta(L, tname_gc, name, funcs_gc, base, 0);
+
+	/* Always create regular metatable and raw metatable. */
+	createmeta(L, tname, name, funcs, base, 0);
+	createmeta(L, tname_raw, name, funcs_raw, base, 0);
+	lua_setmetatable(L, -2);
+
+	if (funcs_gc && funcs)
+		lua_setmetatable(L, -2);
+
+	lua_pop(L, 1);
+}
+
+void *checkudata3(lua_State *L, int ud, const char *tname)
+{
+	int idx, n;
+	void *p = lua_touserdata(L, ud);
+	if (p == NULL)
+		return NULL;
+
+	luaL_getmetatable(L, tname);
+	idx = ud;
+	for (n = 1; lua_getmetatable(L, idx); n++) {
+		if (lua_rawequal(L, -1, -1 - n)) {
+			lua_pop(L, n + 1);
+			return p;
+		}
+		idx = -1;
+	}
+	lua_pop(L, n);
+
+	luaL_typerror(L, ud, tname);
 	return NULL;
 }
 

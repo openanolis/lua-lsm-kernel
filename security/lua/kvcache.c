@@ -517,10 +517,13 @@ int lua_object_incr(lua_State *L, struct kvcache_dict *dict)
  *		if not mt then
  *			return nil
  *		end
- *		local v = mt[key]
- *		if v then
- *			return v
- *		end
+ *		repeat
+ *		    local v = rawget(mt, key)
+ *		    if v then
+ *		        return v
+ *		    end
+ *		    mt = getmetatable(mt)
+ *		until mt == nil
  *		local module = fenv.MODULE_KEY
  *		return C.kvcache_get(L, object.kvcache, module, key)
  *	end
@@ -531,10 +534,14 @@ int lua_object_index(lua_State *L, struct kvcache_dict *dict)
 		__log_err("NO metatable for userdata\n");
 		return 0;
 	}
-	lua_pushvalue(L, 2);
-	lua_rawget(L, -2);		/* metatable[key] */
-	if (!lua_isnoneornil(L, -1))
-		return 1;
+
+	do {
+		lua_pushvalue(L, 2);
+		lua_rawget(L, -2);		/* metatable[key] */
+		if (!lua_isnil(L, -1))
+			return 1;
+		lua_pop(L, 1);
+	} while (lua_getmetatable(L, -1));
 
 	return lua_object_get(L, dict);
 }
@@ -623,6 +630,6 @@ static const luaL_Reg shdict_meth[] = {
 
 int shdict_init(lua_State *L)
 {
-	createmeta(L, METH_SHARED_DICT, shdict_meth, 1, 1);
+	createmeta(L, METH_SHARED_DICT, "shdict", shdict_meth, NULL, 1);
 	return 0;
 }
