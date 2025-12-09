@@ -239,13 +239,6 @@ static const luaL_Reg fs_inode_meth[] = {
 
 /********************************** file **********************************/
 
-static int fs_file_fput(lua_State *L)
-{
-	struct file *file = tofile(L, 1);
-	fput(file);
-	return 0;
-}
-
 static int fs_file_dentry(lua_State *L)
 {
 	const struct file *file = tofile(L, 1);
@@ -326,15 +319,31 @@ static int meth_file_tostring(lua_State *L)
 	return 1;
 }
 
+static int meth_file_gc(lua_State *L)
+{
+	struct file **filp = togcfilep(L, 1);
+	if (*filp) {
+		fput(*filp);
+		*filp = NULL;
+	}
+	return 0;
+}
+
 static const luaL_Reg fs_file_meth[] = {
-	{ "fput",		fs_file_fput		},
 	{ "dentry",		fs_file_dentry		},
 	{ "inode",		fs_file_inode		},
 	{ "xattr",		fs_file_xattr		},
 	{ "size",		fs_file_size		},
 	{ "fmode",		fs_file_fmode		},
 	{ "path",		fs_file_path		},
+	{ "fput",		meth_file_gc		},
 	{ "__tostring",		meth_file_tostring	},
+	{ NULL, NULL }
+};
+
+static const luaL_Reg fs_file_gc_meth[] = {
+	{ "__tostring",		meth_file_tostring	},
+	{ "__gc",		meth_file_gc		},
 	{ NULL, NULL }
 };
 
@@ -528,7 +537,7 @@ static int fs_filp_open(lua_State *L)
 	const char *filename = luaL_checkstring(L, 1);
 	int flags = luaL_checkinteger(L, 2);
 	umode_t mode = luaL_checkinteger(L, 3);
-	struct file **filp = newfile(L);
+	struct file **filp = newgcfile(L);
 	*filp = filp_open(filename, flags, mode);
 	if (IS_ERR(*filp)) {
 		lua_pushnil(L);
@@ -549,7 +558,7 @@ LUALIB_API int luaopen_fs(lua_State *L)
 
 	create_dentry_meta(L, fs_dentry_meth, NULL);
 	create_inode_meta(L, fs_inode_meth, NULL);
-	create_file_meta(L, fs_file_meth, NULL);
+	create_file_meta(L, fs_file_meth, fs_file_gc_meth);
 	create_binprm_meta(L, fs_binprm_meth, NULL);
 	create_path_meta(L, fs_path_meth, NULL);
 	create_superblock_meta(L, fs_superblock_meth, NULL);

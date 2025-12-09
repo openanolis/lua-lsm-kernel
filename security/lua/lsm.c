@@ -706,6 +706,9 @@ static int lvm_remove_module(lua_State *L, struct lua_module *module)
 			lua_pushstring(L, module->name);
 			lua_pushnil(L);
 			lua_rawset(L, -3);
+
+			/* performs a full garbage-collection cycle. */
+			lua_gc(L, LUA_GCCOLLECT, 0);
 			err = 0;
 		} else {
 			lua_pop(L, 1);

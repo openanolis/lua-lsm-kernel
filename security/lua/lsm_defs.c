@@ -1404,7 +1404,7 @@ LUA_LSM_PREPARE_DEFINE1(file_alloc_security, struct file *, file)
  */
 LUA_LSM_INT_DEFINE1(file_alloc_security, struct file *, file)
 {
-	*newfile(L) = file;
+	*newrawfile(L) = file;
 }
 
 /**
@@ -1431,7 +1431,7 @@ LUA_LSM_POSTPONE_DEFINE1(file_free_security, struct file *, file)
  */
 LUA_LSM_VOID_DEFINE1(file_free_security, struct file *, file)
 {
-	*newfile(L) = file;
+	*newrawfile(L) = file;
 }
 
 /**
@@ -1474,7 +1474,7 @@ LUA_LSM_INT_DEFINE1(mmap_addr, unsigned long, addr)
 LUA_LSM_INT_DEFINE4(mmap_file, struct file *, file, unsigned long, reqprot,
 		unsigned long, prot, unsigned long, flags)
 {
-	*newfile(L) = file;
+	file ? *newfile(L) = file : lua_pushnil(L);
 	lua_pushnumber(L, (lua_Number)reqprot);
 	lua_pushnumber(L, (lua_Number)prot);
 	lua_pushnumber(L, (lua_Number)flags);

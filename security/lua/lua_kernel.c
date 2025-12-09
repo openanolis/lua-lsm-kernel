@@ -219,8 +219,7 @@ static int kernel_task_exe_file(lua_State *L)
 	struct file *exe_file = get_task_exe_file(task);
 	if (exe_file == NULL)
 		return 0;
-	/* XXX: fput() must be called after use. */
-	*newfile(L) = exe_file;
+	*newgcfile(L) = exe_file;
 	return 1;
 }
 
