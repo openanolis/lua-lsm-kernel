@@ -52,8 +52,11 @@ static int kernel_cred_cap_eip(lua_State *L)
 	if (top == 1) {
 		/* get caps */
 		*newcap(L) = cred->cap_effective;
+		settopfenvfrom(L, 1);
 		*newcap(L) = cred->cap_inheritable;
+		settopfenvfrom(L, 1);
 		*newcap(L) = cred->cap_permitted;
+		settopfenvfrom(L, 1);
 		return 3;
 	}
 	/* set caps */
@@ -72,6 +75,7 @@ static int kernel_cred_cap_bset(lua_State *L)
 	struct cred *cred = tocred(L, 1);
 	if (lua_gettop(L) == 1) {
 		*newcap(L) = cred->cap_bset;
+		settopfenvfrom(L, 1);
 		return 1;
 	} else {
 		cred->cap_bset = tocap(L, 2);
@@ -85,6 +89,7 @@ static int kernel_cred_cap_ambient(lua_State *L)
 	struct cred *cred = tocred(L, 1);
 	if (lua_gettop(L) == 1) {
 		*newcap(L) = cred->cap_ambient;
+		settopfenvfrom(L, 1);
 		return 1;
 	} else {
 		cred->cap_ambient = tocap(L, 2);
@@ -220,6 +225,7 @@ static int kernel_task_exe_file(lua_State *L)
 	if (exe_file == NULL)
 		return 0;
 	*newgcfile(L) = exe_file;
+	settopfenvfrom(L, 1);
 	return 1;
 }
 

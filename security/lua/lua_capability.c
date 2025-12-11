@@ -65,11 +65,13 @@ static int capability_add(lua_State *L)
 	if (tt == LUA_TUSERDATA) {
 		const kernel_cap_t cap2 = tocap(L, 2);
 		*newcap(L) = cap_combine(cap1, cap2);
+		settopfenvfrom(L, 1);
 		return 1;
 	} else if (tt == LUA_TNUMBER) {
 		int flag = luaL_checkint(L, 2);
 		cap_raise(cap1, flag);
 		*newcap(L) = cap1;
+		settopfenvfrom(L, 1);
 		return 1;
 	} else {
 		return 0;
@@ -83,11 +85,13 @@ static int capability_sub(lua_State *L)
 	if (tt == LUA_TUSERDATA) {
 		const kernel_cap_t cap2 = tocap(L, 2);
 		*newcap(L) = cap_drop(cap1, cap2);
+		settopfenvfrom(L, 1);
 		return 1;
 	} else if (tt == LUA_TNUMBER) {
 		int flag = luaL_checkint(L, 2);
 		cap_lower(cap1, flag);
 		*newcap(L) = cap1;
+		settopfenvfrom(L, 1);
 		return 1;
 	} else {
 		return 0;
@@ -99,6 +103,7 @@ static int capability_mul(lua_State *L)
 	const kernel_cap_t cap1 = tocap(L, 1);
 	const kernel_cap_t cap2 = tocap(L, 2);
 	*newcap(L) = cap_intersect(cap1, cap2);
+	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -142,12 +147,14 @@ static const luaL_Reg cap_meth[] = {
 static int capability_cap_empty(lua_State *L)
 {
 	*newcap(L) = CAP_EMPTY_SET;
+	/* TODO: settopfenvfrom(L, 1); */
 	return 1;
 }
 
 static int capability_cap_full(lua_State *L)
 {
 	*newcap(L) = CAP_FULL_SET;
+	/* TODO: settopfenvfrom(L, 1); */
 	return 1;
 }
 

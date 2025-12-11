@@ -66,8 +66,7 @@ static int fs_dentry_dput(lua_State *L)
 static int fs_dentry_backing_inode(lua_State *L)
 {
 	struct dentry *dentry = todentry(L, 1);
-	struct inode **inodep = newinode(L);
-	*inodep = d_backing_inode(dentry);
+	*newinode(L) = d_backing_inode(dentry);
 	settopfenvfrom(L, 1);
 	return 1;
 }
@@ -242,8 +241,7 @@ static const luaL_Reg fs_inode_meth[] = {
 static int fs_file_dentry(lua_State *L)
 {
 	const struct file *file = tofile(L, 1);
-	struct dentry **dentryp = newdentry(L);
-	*dentryp = file_dentry(file);
+	*newdentry(L) = file_dentry(file);
 	settopfenvfrom(L, 1);
 	return 1;
 }
@@ -251,8 +249,7 @@ static int fs_file_dentry(lua_State *L)
 static int fs_file_inode(lua_State *L)
 {
 	struct file *file = tofile(L, 1);
-	struct inode **inodep = newinode(L);
-	*inodep = file_inode(file);
+	*newinode(L) = file_inode(file);
 	settopfenvfrom(L, 1);
 	return 1;
 }
@@ -489,6 +486,7 @@ static int fs_vfsmount_superblock(lua_State *L)
 {
 	struct vfsmount *mnt = tovfsmount(L, 1);
 	*newsuperblock(L) = mnt->mnt_sb;
+	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -496,6 +494,7 @@ static int fs_vfsmount_mntidmap(lua_State *L)
 {
 	struct vfsmount *mnt = tovfsmount(L, 1);
 	*newmntidmap(L) = mnt_idmap(mnt);
+	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -544,6 +543,7 @@ static int fs_filp_open(lua_State *L)
 		lua_pushinteger(L, PTR_ERR(*filp));
 		return 2;
 	}
+	/* TODO: settopfenvfrom(L, 1); */
 	return 1;
 }
 
