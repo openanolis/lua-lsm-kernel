@@ -524,29 +524,14 @@ int lua_module_register(const char *code, size_t len)
 	if (IS_ERR(L))
 		return PTR_ERR(L);
 
-	err = luaL_loadbuffer_wrap(L, code, len, "<lua-lsm>");
+	lua_pushcfunction(L, lua_traceback);
+	err = luaL_loadbuffer_wrap(L, code, len, "<lua-lsm:loader>");
 	if (err)
 		goto err_free_lua;
 
-	/* dump function */
-	luaL_checktype(L, -1, LUA_TFUNCTION);
-	luaL_buffinit(L, &B);
-	status = lua_dump(L, lvm_writer, &B);
-	if (status != 0) {
-		__log_err("dump: unable to dump the function\n");
-		err = -EFAULT;
-		goto err_free_lua;
-	}
-	luaL_pushresult(&B);
-	chunk = lua_tolstring(L, -1, &chunk_len);
-	__log_info("compiled, source_len = %d, chunk_len = %d\n",
-		(int)len, (int)chunk_len);
-
 	/* TODO: run in sandbox, record the `require` lua modules */
-	lua_pushcfunction(L, lua_traceback);
-	lua_pushvalue(L, -3);
-	/* stack: [func, chunk, traceback, func] */
-	err = lua_pcall_wrap(L, 0, LUA_MULTRET, -2);
+	/* stack: [traceback, func] */
+	err = lua_pcall_wrap(L, 0, 1, -2);
 	if (err)
 		goto err_free_lua;
 	if (!lua_istable(L, -1)) {
@@ -568,7 +553,20 @@ int lua_module_register(const char *code, size_t len)
 	/* traversal the result table */
 	lua_pushnil(L);
 	while (lua_next(L, -2) != 0) {
+		static const struct {
+			const char *field;
+			int type;
+			int offset;
+		} fields[] = {
+			{ "name",        LUA_TSTRING, offsetof(struct lua_module, name)        },
+			{ "author",      LUA_TSTRING, offsetof(struct lua_module, author)      },
+			{ "description", LUA_TSTRING, offsetof(struct lua_module, description) },
+			{ "license",     LUA_TSTRING, offsetof(struct lua_module, license)     },
+			{ "version",     LUA_TNUMBER, offsetof(struct lua_module, version)     },
+			{ NULL }
+		};
 		const char *key, *s;
+		char *p;
 
 		if (!lua_isstring(L, -2)) {
 			__log_err("module table index must be a string\n");
@@ -577,48 +575,38 @@ int lua_module_register(const char *code, size_t len)
 		}
 
 		key = lua_tostring(L, -2);
-		if (strcmp(key, "name") == 0) {
-			if (lua_isstring(L, -1)) {
+
+		for (i = 0; fields[i].field; i++) {
+			if (strcmp(key, fields[i].field) != 0)
+				continue;
+
+			if (lua_type(L, -1) != fields[i].type) {
+				__log_err("field '%s' must be a %s\n",
+					key, lua_typename(L, fields[i].type));
+				break;
+			}
+
+			p = (char *)module + fields[i].offset;
+			switch (lua_type(L, -1)) {
+			case LUA_TSTRING:
 				s = lua_tostring(L, -1);
-				module->name = kstrdup(s, GFP_KERNEL);
-			} else {
-				__log_err("'%s' value must be a string\n", key);
+				*(const char **)p = kstrdup(s, GFP_KERNEL);
+				break;
+			case LUA_TNUMBER:
+				*(int *)p = (int)lua_tointeger(L, -1);
+				break;
 			}
-		} else if (strcmp(key, "author") == 0) {
-			if (lua_isstring(L, -1)) {
-				s = lua_tostring(L, -1);
-				module->author = kstrdup(s, GFP_KERNEL);
-			} else {
-				__log_err("'%s' value must be a string\n", key);
-			}
-		} else if (strcmp(key, "description") == 0) {
-			if (lua_isstring(L, -1)) {
-				s = lua_tostring(L, -1);
-				module->description = kstrdup(s, GFP_KERNEL);
-			} else {
-				__log_err("'%s' value must be a string\n", key);
-			}
-		} else if (strcmp(key, "license") == 0) {
-			if (lua_isstring(L, -1)) {
-				s = lua_tostring(L, -1);
-				module->license = kstrdup(s, GFP_KERNEL);
-			} else {
-				__log_err("'%s' value must be a string\n", key);
-			}
-		} else if (strcmp(key, "version") == 0) {
-			if (lua_isnumber(L, -1)) {
-				module->version = (int)lua_tointeger(L, -1);
-			} else {
-				__log_err("'%s' value must be a integer\n", key);
-			}
-		} else {
+			break;
+		}
+
+		if (fields[i].field == NULL) {
 			for (i = 0; lua_lsm_hook_stats[i].name; i++) {
 				if (strcmp(lua_lsm_hook_stats[i].name, key) != 0)
 					continue;
 
 				if (!lua_isfunction(L, -1)) {
-					__log_err("'%s' field must be a function\n", key);
-					continue;
+					__log_err("field '%s' must be a function\n", key);
+					break;
 				}
 
 				module->nhooks += 1;
@@ -629,7 +617,7 @@ int lua_module_register(const char *code, size_t len)
 			}
 
 			if (lua_lsm_hook_stats[i].name == NULL)
-				__log_warn("'%s' is unknown function\n", key);
+				__log_warn("field '%s' is unknown\n", key);
 		}
 
 		/* removes 'value'; keeps 'key' for next iteration */
@@ -639,6 +627,26 @@ int lua_module_register(const char *code, size_t len)
 	err = -ENOMEM;
 	if (module->name == NULL)
 		goto err_free_module;
+
+	/* Recompile with the new name */
+	err = luaL_loadbuffer_wrap(L, code, len, module->name);
+	if (err)
+		goto err_free_module;
+
+	/* dump function */
+	luaL_checktype(L, -1, LUA_TFUNCTION);
+	luaL_buffinit(L, &B);
+	status = lua_dump(L, lvm_writer, &B);
+	if (status != 0) {
+		__log_err("dump: unable to dump the function\n");
+		err = -EFAULT;
+		goto err_free_module;
+	}
+	luaL_pushresult(&B);
+	/* stack: [traceback, _M, func, chunk] */
+	chunk = lua_tolstring(L, -1, &chunk_len);
+	__log_info("[%s] compiled, source_len = %d, chunk_len = %d\n",
+		module->name, (int)len, (int)chunk_len);
 
 	module->chunk = kmalloc(chunk_len, GFP_KERNEL);
 	if (module->chunk == NULL)
