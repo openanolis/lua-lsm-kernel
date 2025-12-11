@@ -130,8 +130,8 @@ void lvm_put(lua_State *L)
 static int lua_shared_index(lua_State *L)
 {
 	const char *name = luaL_checkstring(L, 2);
-	struct lua_module_shdict *shdict, *shtmp;
-	struct lua_module *module;
+	struct lua_lsm_module_shdict *shdict, *shtmp;
+	struct lua_lsm_module *module;
 	int found = 0;
 
 	__log_info_ratelimited("READ shared table, [%s] %s\n",
@@ -218,7 +218,7 @@ static int lua_module_fenv_newindex(lua_State *L)
 	return 0;
 }
 
-static int lua_module_load(lua_State *L, struct lua_module *module)
+static int lua_module_load(lua_State *L, struct lua_lsm_module *module)
 {
 	int err;
 
@@ -285,7 +285,7 @@ static int lua_module_load(lua_State *L, struct lua_module *module)
 static int lua_module_index(lua_State *L)
 {
 	const char *key = luaL_checkstring(L, 2);
-	struct lua_module *module;
+	struct lua_lsm_module *module;
 	int err;
 
 	/* module queries are always run with a read lock */
@@ -320,7 +320,7 @@ static int lua_module_index(lua_State *L)
  */
 static void lua_modules_free(struct task_struct *task, lua_State *L)
 {
-	struct lua_module *module;
+	struct lua_lsm_module *module;
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "_MODULES");
 	if (!lua_istable(L, -1)) {
@@ -498,7 +498,7 @@ static int lvm_writer(lua_State *L, const void *b, size_t size, void *B)
 	return 0;
 }
 
-static void lua_module_free(struct lua_module *module)
+static void lua_module_free(struct lua_lsm_module *module)
 {
 	kfree(module->chunk);
 	kfree(module->name);
@@ -510,7 +510,7 @@ static void lua_module_free(struct lua_module *module)
 
 int lua_module_register(const char *code, size_t len)
 {
-	struct lua_module *module, *m;
+	struct lua_lsm_module *module, *m;
 	lua_State *L;
 	luaL_Buffer B;
 	const char *chunk;
@@ -558,11 +558,11 @@ int lua_module_register(const char *code, size_t len)
 			int type;
 			int offset;
 		} fields[] = {
-			{ "name",        LUA_TSTRING, offsetof(struct lua_module, name)        },
-			{ "author",      LUA_TSTRING, offsetof(struct lua_module, author)      },
-			{ "description", LUA_TSTRING, offsetof(struct lua_module, description) },
-			{ "license",     LUA_TSTRING, offsetof(struct lua_module, license)     },
-			{ "version",     LUA_TNUMBER, offsetof(struct lua_module, version)     },
+			{ "name",		LUA_TSTRING,	offsetof(struct lua_lsm_module,	name)		},
+			{ "author",		LUA_TSTRING,	offsetof(struct lua_lsm_module,	author)		},
+			{ "description",	LUA_TSTRING,	offsetof(struct lua_lsm_module,	description)	},
+			{ "license",		LUA_TSTRING,	offsetof(struct lua_lsm_module,	license)	},
+			{ "version",		LUA_TNUMBER,	offsetof(struct lua_lsm_module,	version)	},
 			{ NULL }
 		};
 		const char *key, *s;
@@ -700,7 +700,7 @@ err_free_lua:
 	return err;
 }
 
-static int lvm_remove_module(lua_State *L, struct lua_module *module)
+static int lvm_remove_module(lua_State *L, struct lua_lsm_module *module)
 {
 	int err = -ENOENT;
 	/* registry._MODULES[modname] = nil */
@@ -728,7 +728,7 @@ static int lvm_remove_module(lua_State *L, struct lua_module *module)
 
 static int task_remove_module(struct task_struct *task, void *arg)
 {
-	struct lua_module *module = arg;
+	struct lua_lsm_module *module = arg;
 	lua_State *L;
 	int err;
 
@@ -744,7 +744,7 @@ static int task_remove_module(struct task_struct *task, void *arg)
 	return err;
 }
 
-static int tasks_lvm_remove_module(struct lua_module *module, int *nbusy)
+static int tasks_lvm_remove_module(struct lua_lsm_module *module, int *nbusy)
 {
 	struct task_struct *g, *task;
 	int count = 0;
@@ -782,12 +782,12 @@ static int tasks_lvm_remove_module(struct lua_module *module, int *nbusy)
  * Due to the limitations of schedule_on_each_cpu(), global variables
  * are used to pass parameters to the callback function.
  */
-static struct lua_module *work_ctx_remove_module;
+static struct lua_lsm_module *work_ctx_remove_module;
 static atomic_t work_ctx_remove_count;
 
 static void softirq_lvm_remove_module(struct work_struct *work)
 {
-	struct lua_module *module = work_ctx_remove_module;
+	struct lua_lsm_module *module = work_ctx_remove_module;
 	int cpu = smp_processor_id();
 	int err;
 
@@ -808,8 +808,8 @@ static void softirq_lvm_remove_module(struct work_struct *work)
 
 int lua_module_unregister(const char *name)
 {
-	struct lua_module *module;
-	struct lua_module_shdict *shdict, *tmp;
+	struct lua_lsm_module *module;
+	struct lua_lsm_module_shdict *shdict, *tmp;
 	int count = 0, nloaded, nbusy;
 	unsigned int cpu;
 	int found = 0;
@@ -937,7 +937,7 @@ int lua_module_unregister(const char *name)
 
 int modules_show(struct seq_file *m, void *v)
 {
-	struct lua_module *module;
+	struct lua_lsm_module *module;
 	int idx;
 
 	seq_printf(m, "modules for lua-lsm\n");

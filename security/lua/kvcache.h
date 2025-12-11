@@ -17,11 +17,11 @@
 
 #define CACHE_CAPACITY	1024
 
-struct lua_module;
+struct lua_lsm_module;
 
 struct kvcache_node {
 	const char *key;
-	struct lua_module *module;
+	struct lua_lsm_module *module;
 	struct kvcache_dict *dict;
 	atomic_t refcount;
 	rwlock_t lock;
@@ -42,7 +42,7 @@ struct kvcache_dict {
 	RB_HEAD(kvcache, kvcache_node) root;
 };
 
-int kvcache_module_nodes_gc(struct lua_module *module);
+int kvcache_module_nodes_gc(struct lua_lsm_module *module);
 void kvcache_dict_free(struct kvcache_dict *dict);
 void kvcache_dict_init(struct kvcache_dict *dict);
 void kvcache_status(int *nalloc, int *nfree);

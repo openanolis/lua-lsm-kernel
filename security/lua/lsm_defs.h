@@ -122,7 +122,7 @@
 	static inline int __lua_lsm_ ## NAME(DECL_ARGS_ ## x				\
 					__MAP(x, __SC_DECL, __VA_ARGS__))		\
 	{										\
-		struct lua_module *module;						\
+		struct lua_lsm_module *module;						\
 		lua_State *L;								\
 		int ret = LSM_RET_DEFAULT(NAME);					\
 		if (atomic_read(&lua_lsm_hook_stats[__LL_NR_ ## NAME].nhooks) == 0)	\

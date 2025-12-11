@@ -53,26 +53,26 @@ enum {
 	__LL_NR_MAX
 };
 
-struct lua_module_shdict {
+struct lua_lsm_module_shdict {
 	struct list_head list;
 	struct kvcache_dict dict;
 	char name[];
 };
 
-enum lua_module_state {
+enum lua_lsm_module_state {
 	LMS_STATE_LIVE,
 	LMS_STATE_COMING,
 	LMS_STATE_GOING,
 	LMS_STATE_ZOMBIE,
 };
 
-struct lua_module {
+struct lua_lsm_module {
 	const char *name;
 	const char *author;
 	const char *description;
 	const char *license;
 	int version;
-	enum lua_module_state state;
+	enum lua_lsm_module_state state;
 	struct list_head list;
 	__BITMAP_TYPE(, uint32_t, __LL_NR_MAX) hookfuncs;
 	int nhooks;
