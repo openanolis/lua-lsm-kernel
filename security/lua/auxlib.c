@@ -302,11 +302,6 @@ void createmeta(lua_State *L, const char *tname, const char *name,
 	/* metatable.__metatable = error_message */
 	lua_pushstring(L, "cannot set a protected metatable");
 	lua_setfield(L, -2, "__metatable");
-	if (name) {
-		/* metatable.__name = name */
-		lua_pushstring(L, name);
-		lua_setfield(L, -2, "__name");
-	}
 
 	/* metatable.__index = metatable */
 	lua_pushvalue(L, -1);

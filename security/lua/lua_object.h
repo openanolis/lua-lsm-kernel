@@ -44,7 +44,12 @@
 		return lua_object_ ## fname(L, &ll->dict);					\
 	}
 
-#define LUA_OBJECT_TOSTRING_FUNC(name, ctype)							\
+#define LUA_OBJECT_FUNCS_DEFINE(name, ctype)							\
+	static int rawmeth_ ## name ## _type(lua_State *L)					\
+	{											\
+		lua_pushstring(L, #name);							\
+		return 1;									\
+	}											\
 	static int rawmeth_ ## name ## _tostring(lua_State *L)					\
 	{											\
 		ctype o = toraw ## name(L, 1);							\
@@ -60,20 +65,21 @@
 	LUA_OBJECT_KVCACHE_FUNC(name, ctype, blob, kvcache_incr, incr)				\
 	LUA_OBJECT_KVCACHE_FUNC(name, ctype, blob, index, index)				\
 	LUA_OBJECT_KVCACHE_FUNC(name, ctype, blob, newindex, newindex)				\
-	LUA_OBJECT_TOSTRING_FUNC(name, ctype)							\
+	LUA_OBJECT_FUNCS_DEFINE(name, ctype)							\
 	static inline void create_ ## name ## _meta(lua_State *L,				\
 				const luaL_Reg *funcs, const luaL_Reg *gc)			\
 	{											\
-		static const luaL_Reg rawmeths[] = {						\
-			{ "kvcache_set",	rawmeth_ ## name ## _newindex		},	\
-			{ "kvcache_get",	rawmeth_ ## name ## _kvcache_get	},	\
-			{ "kvcache_incr",	rawmeth_ ## name ## _kvcache_incr	},	\
-			{ NULL, NULL }								\
-		};										\
 		static const luaL_Reg basemeths[] = {						\
 			{ "__index",		rawmeth_ ## name ## _index		},	\
 			{ "__newindex",		rawmeth_ ## name ## _newindex		},	\
 			{ "__tostring",		rawmeth_ ## name ## _tostring		},	\
+			{ NULL, NULL }								\
+		};										\
+		static const luaL_Reg rawmeths[] = {						\
+			{ "kvcache_set",	rawmeth_ ## name ## _newindex		},	\
+			{ "kvcache_get",	rawmeth_ ## name ## _kvcache_get	},	\
+			{ "kvcache_incr",	rawmeth_ ## name ## _kvcache_incr	},	\
+			{ "type",		rawmeth_ ## name ## _type		},	\
 			{ NULL, NULL }								\
 		};										\
 		createmeta3(L, #name, basemeths, METHOD_NAME_GC(name), gc,			\
@@ -84,16 +90,20 @@
 	LUA_OBJECT_META_DEFINE(name, ctype, d, METHOD_NAME(name))				\
 	LUA_OBJECT_META_DEFINE(raw ## name, ctype, d, METHOD_NAME_RAW(name))			\
 	LUA_OBJECT_META_DEFINE(gc ## name, ctype, d, METHOD_NAME_GC(name))			\
-	LUA_OBJECT_TOSTRING_FUNC(name, ctype)							\
+	LUA_OBJECT_FUNCS_DEFINE(name, ctype)							\
 	static inline void create_ ## name ## _meta(lua_State *L,				\
 				const luaL_Reg *funcs, const luaL_Reg *gc)			\
 	{											\
 		static const luaL_Reg basemeths[] = {						\
-			{ "__tostring",		rawmeth_ ## name ## _tostring	},		\
+			{ "__tostring",		rawmeth_ ## name ## _tostring		},	\
+			{ NULL, NULL }								\
+		};										\
+		static const luaL_Reg rawmeths[] = {						\
+			{ "type",		rawmeth_ ## name ## _type		},	\
 			{ NULL, NULL }								\
 		};										\
 		createmeta3(L, #name, basemeths, METHOD_NAME_GC(name), gc,			\
-			METHOD_NAME(name), funcs, METHOD_NAME_RAW(name), NULL);			\
+			METHOD_NAME(name), funcs, METHOD_NAME_RAW(name), rawmeths);		\
 	}
 
 #define LUA_OBJECT_task_DEFINE(name, ctype, d)							\
