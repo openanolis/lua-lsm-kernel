@@ -249,17 +249,30 @@ static int sockaddr_family(lua_State *L)
 static int sockaddr_addrs(lua_State *L)
 {
 	struct sockaddr *sa = tosockaddr(L, 1);
+	int readable = lua_toboolean(L, 2);
+	char buffer[128];
+	int l;
 	switch (sa->sa_family) {
 	case AF_INET:
 		lua_pushstring(L, "inet");
+		if (readable) {
+			l = snprintf(buffer, sizeof(buffer), "%pISc", sa);
+			lua_pushlstring(L, buffer, l);
+		} else {
+			lua_pushinteger(L, ((struct sockaddr_in *)sa)->sin_addr.s_addr);
+		}
 		lua_pushinteger(L, ntohs(((struct sockaddr_in *)sa)->sin_port));
-		lua_pushinteger(L, ((struct sockaddr_in *)sa)->sin_addr.s_addr);
 		return 3;
 	case AF_INET6:
 		lua_pushstring(L, "inet6");
-		lua_pushinteger(L, ntohs(((struct sockaddr_in6 *)sa)->sin6_port));
-		lua_pushlstring(L, ((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr,
+		if (readable) {
+			l = snprintf(buffer, sizeof(buffer), "%pISc", sa);
+			lua_pushlstring(L, buffer, l);
+		} else {
+			lua_pushlstring(L, ((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr,
 				sizeof(((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr));
+		}
+		lua_pushinteger(L, ntohs(((struct sockaddr_in6 *)sa)->sin6_port));
 		return 3;
 	case AF_UNIX:
 		lua_pushstring(L, "unix");
@@ -269,9 +282,31 @@ static int sockaddr_addrs(lua_State *L)
 	return 0;
 }
 
+static int meth_sockaddr_tostring(lua_State *L)
+{
+	struct sockaddr *sa = tosockaddr(L, 1);
+	char buffer[128];
+	int l;
+	switch (sa->sa_family) {
+	case AF_INET:
+		l = snprintf(buffer, sizeof(buffer), "inet: %pISpc", sa);
+		lua_pushlstring(L, buffer, l);
+		break;
+	case AF_INET6:
+		l = snprintf(buffer, sizeof(buffer), "inet6: %pISpc", sa);
+		lua_pushlstring(L, buffer, l);
+		break;
+	case AF_UNIX:
+		lua_pushfstring(L, "unix: %s", ((struct sockaddr_un *)sa)->sun_path);
+		break;
+	}
+	return 1;
+}
+
 static const luaL_Reg sockaddr_meth[] = {
-	{ "family",	sockaddr_family	},
-	{ "addrs",	sockaddr_addrs	},
+	{ "family",	sockaddr_family		},
+	{ "addrs",	sockaddr_addrs		},
+	{ "__tostring",	meth_sockaddr_tostring	},
 	{ NULL, NULL }
 };
 
