@@ -19,7 +19,7 @@
 #undef LSM_HOOK
 
 
-#ifdef CONFIG_SECURITY_LUA_LSM_STATISTICS
+#ifdef CONFIG_SECURITY_LUA_LSM_STATS
 
 #define START_STATS(NAME)								\
 	do {										\

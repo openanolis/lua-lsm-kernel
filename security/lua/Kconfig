@@ -9,7 +9,7 @@ config SECURITY_LUA_LSM
 	  This selects the Lua based LSM.
 	  If you are unsure how to answer this question, answer N.
 
-config SECURITY_LUA_LSM_STATISTICS
+config SECURITY_LUA_LSM_STATS
 	bool "Lua-LSM Statistics"
 	depends on SECURITY_LUA_LSM
 	default n

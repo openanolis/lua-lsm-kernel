@@ -134,15 +134,22 @@ static const struct file_operations fops_module = {
 	.release	= single_release,
 };
 
-#ifdef CONFIG_SECURITY_LUA_LSM_STATISTICS
+#ifdef CONFIG_SECURITY_LUA_LSM_STATS
 
-static int open_status(struct inode *inode, struct file *filp)
+static int stats_show(struct seq_file *m, void *v)
 {
-	return single_open(filp, lua_lsm_status_show, NULL);
+	lvm_stats_show(m);
+	kvcache_stats_show(m);
+	return 0;
 }
 
-static const struct file_operations fops_status = {
-	.open		= open_status,
+static int open_stats(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, stats_show, NULL);
+}
+
+static const struct file_operations fops_stats = {
+	.open		= open_stats,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
 	.release	= single_release,
@@ -150,7 +157,7 @@ static const struct file_operations fops_status = {
 
 static int open_lsm_funcs(struct inode *inode, struct file *filp)
 {
-	return single_open(filp, lsmhook_stat_show, NULL);
+	return single_open(filp, lsm_funcs_show, NULL);
 }
 
 static const struct file_operations fops_lsm_funcs = {
@@ -172,8 +179,8 @@ static struct lua_file {
 	{ "register",	0222,	&fops_register		},	/* -w--w--w- */
 	{ "unregister",	0222,	&fops_unregister	},	/* -w--w--w- */
 	{ "module",	0444,	&fops_module		},	/* r--r--r-- */
-#ifdef CONFIG_SECURITY_LUA_LSM_STATISTICS
-	{ "status",	0444,	&fops_status		},	/* r--r--r-- */
+#ifdef CONFIG_SECURITY_LUA_LSM_STATS
+	{ "stats",	0444,	&fops_stats		},	/* r--r--r-- */
 	{ "lsm_funcs",	0444,	&fops_lsm_funcs		},	/* r--r--r-- */
 #endif
 	{ NULL, 0, NULL }

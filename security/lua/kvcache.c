@@ -16,8 +16,38 @@
 #include "lsm.h"
 #include "kvcache.h"
 
+
+#ifdef CONFIG_SECURITY_LUA_LSM_STATS
+
 static atomic_t node_nalloc = ATOMIC_INIT(0);
 static atomic_t node_nfree = ATOMIC_INIT(0);
+static atomic_t node_nusage = ATOMIC_INIT(0);
+
+static void kvcache_stats_alloc(void)
+{
+	atomic_inc(&node_nalloc);
+	atomic_inc(&node_nusage);
+}
+
+static void kvcache_stats_free(void)
+{
+	atomic_inc(&node_nfree);
+	atomic_dec(&node_nusage);
+}
+
+void kvcache_stats_show(struct seq_file *m)
+{
+	seq_printf(m, "kvcache.nalloc\t= %9d\n", atomic_read(&node_nalloc));
+	seq_printf(m, "kvcache.nfree\t= %9d\n", atomic_read(&node_nfree));
+	seq_printf(m, "kvcache.nusage\t= %9d\n", atomic_read(&node_nusage));
+}
+
+#else
+
+static inline void kvcache_stats_alloc(void) {}
+static inline void kvcache_stats_free(void) {}
+
+#endif
 
 static int kvcache_node_cmp(struct kvcache_node *n1, struct kvcache_node *n2)
 {
@@ -70,7 +100,7 @@ kvcache_node_alloc(struct kvcache_dict *dict, struct lua_lsm_module *module,
 	node->dict = dict;
 	refcount_init(&node->refcount, 1);
 	rwlock_init(&node->lock);
-	atomic_inc(&node_nalloc);
+	kvcache_stats_alloc();
 	return node;
 }
 
@@ -88,7 +118,7 @@ static void kvcache_node_clear(struct kvcache_node *node)
 static void kvcache_node_free(struct kvcache_node *node)
 {
 	kvcache_node_clear(node);
-	atomic_inc(&node_nfree);
+	kvcache_stats_free();
 	kfree(node);
 }
 
@@ -449,14 +479,6 @@ void kvcache_dict_init(struct kvcache_dict *dict)
 	RB_INIT(&dict->root);
 	atomic_set(&dict->count, 0);
 	dict->capacity = CACHE_CAPACITY;
-}
-
-void kvcache_status(int *nalloc, int *nfree)
-{
-	if (nalloc)
-		*nalloc = atomic_read(&node_nalloc);
-	if (nfree)
-		*nfree = atomic_read(&node_nfree);
 }
 
 /******************************** object cache *******************************/

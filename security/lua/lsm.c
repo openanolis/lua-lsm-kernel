@@ -72,40 +72,157 @@ struct lua_lsm_hook_stat lua_lsm_hook_stats[] = {
 #include <linux/lsm_hook_defs.h>
 #undef LSM_HOOK
 
+/********************************** stats **********************************/
+
+/* used by module unregister */
+static atomic_t vm_nusage = ATOMIC_INIT(0);
+
+#ifdef CONFIG_SECURITY_LUA_LSM_STATS
+
+static atomic_t vm_nalloc = ATOMIC_INIT(0);
+static atomic_t vm_nfree = ATOMIC_INIT(0);
+static atomic_t mem_nalloc = ATOMIC_INIT(0);
+static atomic_t mem_nrealloc = ATOMIC_INIT(0);
+static atomic_t mem_nfree = ATOMIC_INIT(0);
+static atomic_t mem_total = ATOMIC_INIT(0);
+static atomic_t mem_minimum = ATOMIC_INIT(INT_MAX);
+static atomic_t mem_maximum = ATOMIC_INIT(0);
+
+static void lvm_stats_vmalloc(void)
+{
+	atomic_inc(&vm_nalloc);
+	atomic_inc(&vm_nusage);
+}
+
+static void lvm_stats_vmfree(void)
+{
+	atomic_inc(&vm_nfree);
+	atomic_dec(&vm_nusage);
+}
+
+static void lvm_stats_memalloc(struct lvm_state *lvm, void *ptr,
+		size_t osize, size_t nsize)
+{
+	lua_State *L = lvm->L;
+	int minimum, maximum, nbytes;
+
+	if (nsize == 0) {
+		atomic_inc(&mem_nfree);
+		atomic_inc(&lvm->nfree);
+		atomic_sub((int)osize, &mem_total);
+	} else {
+		if (ptr) {
+			atomic_inc(&mem_nrealloc);
+			atomic_inc(&lvm->nrealloc);
+		} else {
+			atomic_inc(&mem_nalloc);
+			atomic_inc(&lvm->nalloc);
+		}
+
+		atomic_add(nsize - osize, &mem_total);
+	}
+
+	if (L == NULL)
+		return;
+
+	minimum = atomic_read(&mem_minimum);
+	maximum = atomic_read(&mem_maximum);
+	/*
+	 * XXX Notes: There may be a deadlock risk if internal lua_lock()
+	 * is actually used. The current architecture does not use locking,
+	 * so lua_gc() is fine here.
+	 */
+	nbytes = lua_gc(L, LUA_GCCOUNT, 0) * 1024 + lua_gc(L, LUA_GCCOUNTB, 0);
+	atomic_cmpxchg(&mem_minimum, minimum, min(minimum, nbytes));
+	atomic_cmpxchg(&mem_maximum, maximum, max(maximum, nbytes));
+}
+
+void lvm_stats_show(struct seq_file *m)
+{
+	int nusage = atomic_read(&vm_nusage);
+	int total = atomic_read(&mem_total);
+	int average = nusage ? total / nusage : 0;
+
+	seq_printf(m, "lvm.nalloc\t= %9d\n", atomic_read(&vm_nalloc));
+	seq_printf(m, "lvm.nfree\t= %9d\n", atomic_read(&vm_nfree));
+	seq_printf(m, "lvm.nusage\t= %9d\n", nusage);
+	seq_printf(m, "lmem.nalloc\t= %9d\n", atomic_read(&mem_nalloc));
+	seq_printf(m, "lmem.nrealloc\t= %9d\n", atomic_read(&mem_nrealloc));
+	seq_printf(m, "lmem.nfree\t= %9d\n", atomic_read(&mem_nfree));
+	seq_printf(m, "lmem.total\t= %9d\n", total);
+	seq_printf(m, "lmem.average\t= %9d\n", average);
+	seq_printf(m, "lmem.minimum\t= %9d\n", atomic_read(&mem_minimum));
+	seq_printf(m, "lmem.maximum\t= %9d\n", atomic_read(&mem_maximum));
+}
+
+int lsm_funcs_show(struct seq_file *m, void *v)
+{
+	struct lua_lsm_hook_stat *stat;
+	int i = 1;
+
+	seq_printf(m, "stats for lua-lsm (ns)\n");
+	seq_printf(m, "%3s %-28s %4s %12s %15s %10s %12s\n",
+		"num", "name", "nlsm", "count", "total", "average", "maxtime");
+	seq_printf(m, "%s\n", TABLINE);
+
+	for (stat = lua_lsm_hook_stats; stat->name; stat++) {
+		int n = atomic_read(&stat->count);
+		s64 total = atomic64_read(&stat->time);
+		s64 maxtime = atomic64_read(&stat->maxtime);
+		seq_printf(m, "%3d %-28s %4d %12d %15llu %10llu %12llu\n",
+			i++, stat->name, atomic_read(&stat->nhooks),
+			n, total, n ? total / n : 0, maxtime);
+	}
+	return 0;
+}
+
+#else
+
+static inline void lvm_stats_vmalloc(void)
+{
+	atomic_inc(&vm_nusage);
+}
+
+static inline void lvm_stats_vmfree(void)
+{
+	atomic_dec(&vm_nusage);
+}
+
+static inline void lvm_stats_memalloc(struct lvm_state *lvm, void *ptr,
+		size_t osize, size_t nsize)
+{
+}
+
+#endif
+
 /********************************** Lua VM **********************************/
 
-struct lvm_userdata {
-	bool softirq;
-};
-
-static struct lvm_userdata irq_lvms_ud = {
-	.softirq = true,
-};
-
-static DEFINE_PER_CPU(lua_State *, irq_lvms);
+static DEFINE_PER_CPU(struct lvm_state *, irq_lvms);
 
 static lua_State *
 lvm_get_from_task(const struct task_struct *task, bool exclusive)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	int n = refcount_acquire(&llt->refcount);
+	struct lvm_state *lvm = &llt->lvm;
+	int n = refcount_acquire(&lvm->refcount);
 	if (exclusive && n != 1) {
-		refcount_release(&llt->refcount);
+		refcount_release(&lvm->refcount);
 		return NULL;
 	}
 	WARN_ON(n != 1);
 	KASSERT(n == 1, ("<%s> Lua VM is reused, refcount = %d\n",
 		task->comm, n));
-	return llt->L;
+	return lvm->L;
 }
 
 static void lvm_put_to_task(const struct task_struct *task, lua_State *L)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	int n = refcount_release(&llt->refcount);
+	struct lvm_state *lvm = &llt->lvm;
+	int n = refcount_release(&lvm->refcount);
 	KASSERT(n == 0, ("<%s> Lua VM is reused, refcount = %d\n",
 		task->comm, n));
-	WARN_ON(L != llt->L);
+	WARN_ON(L != lvm->L);
 }
 
 lua_State *lvm_get(void)
@@ -115,7 +232,7 @@ lua_State *lvm_get(void)
 	if (in_task())
 		return lvm_get_from_task(current, false);
 	else
-		return get_cpu_var(irq_lvms);
+		return get_cpu_var(irq_lvms)->L;
 }
 
 void lvm_put(lua_State *L)
@@ -343,6 +460,7 @@ static void lua_modules_free(struct task_struct *task, lua_State *L)
 	lua_pop(L, 1);
 }
 
+/********************************** Lua VM **********************************/
 
 static const luaL_Reg builtinlibs[] = {
 	{ "kernel",	luaopen_kernel		},
@@ -373,31 +491,14 @@ static int ll_require(lua_State *L)
 	return 1;
 }
 
-
-static atomic_t vm_nalloc = ATOMIC_INIT(0);
-static atomic_t vm_nfree = ATOMIC_INIT(0);
-static atomic_t vm_inuse = ATOMIC_INIT(0);
-static atomic_t mem_nalloc = ATOMIC_INIT(0);
-static atomic_t mem_nrealloc = ATOMIC_INIT(0);
-static atomic_t mem_nfree = ATOMIC_INIT(0);
-
 static void *lvm_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
 {
-	struct lvm_userdata *args = ud;
-
-	(void)osize;
-	(void)args;
+	lvm_stats_memalloc(ud, ptr, osize, nsize);
 
 	if (nsize == 0) {
-		atomic_inc(&mem_nfree);
 		kfree(ptr);
 		return NULL;
 	} else {
-		if (ptr)
-			atomic_inc(&mem_nrealloc);
-		else
-			atomic_inc(&mem_nalloc);
-
 		return krealloc(ptr, nsize, lua_lsm_gfp());
 	}
 }
@@ -443,15 +544,16 @@ static int lvm_pmain(lua_State *L)
 	return 1;
 }
 
-static lua_State *lua_state_alloc(struct lvm_userdata *args)
+static int lua_state_alloc(struct lvm_state *lvm)
 {
 	lua_State *L;
 	int status;
 
-	L = lua_newstate(lvm_alloc, args);
+	L = lua_newstate(lvm_alloc, lvm);
 	if (L == NULL)
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 
+	lvm->L = L;
 	lua_atpanic(L, lvm_panic);
 	lua_gc(L, LUA_GCSTOP, 0);
 
@@ -472,20 +574,20 @@ static lua_State *lua_state_alloc(struct lvm_userdata *args)
 
 	if (status != 0) {
 		lua_close(L);
-		return ERR_PTR(status);
+		lvm->L = NULL;
+		return status;
 	}
 
-	atomic_inc(&vm_nalloc);
-	atomic_inc(&vm_inuse);
-	return L;
+	lvm_stats_vmalloc();
+	return 0;
 }
 
-static void lua_state_free(lua_State *L)
+static void lua_state_free(struct lvm_state *lvm)
 {
-	if (L) {
-		atomic_inc(&vm_nfree);
-		atomic_dec(&vm_inuse);
-		lua_close(L);
+	if (lvm->L) {
+		lvm_stats_vmfree();
+		lua_close(lvm->L);
+		lvm->L = NULL;
 	}
 }
 
@@ -511,6 +613,7 @@ static void lua_module_free(struct lua_lsm_module *module)
 int lua_module_register(const char *code, size_t len)
 {
 	struct lua_lsm_module *module, *m;
+	struct lvm_state lvm;
 	lua_State *L;
 	luaL_Buffer B;
 	const char *chunk;
@@ -520,10 +623,12 @@ int lua_module_register(const char *code, size_t len)
 	int status;
 	int err;
 
-	L = lua_state_alloc(NULL);
-	if (IS_ERR(L))
-		return PTR_ERR(L);
+	memset(&lvm, 0, sizeof(struct lvm_state));
+	err = lua_state_alloc(&lvm);
+	if (err)
+		return err;
 
+	L = lvm.L;
 	lua_pushcfunction(L, lua_traceback);
 	err = luaL_loadbuffer_wrap(L, code, len, "<lua-lsm:loader>");
 	if (err)
@@ -689,13 +794,13 @@ int lua_module_register(const char *code, size_t len)
 	pr_info("module <%s> registered with %d filters\n",
 		module->name, module->nhooks);
 
-	lua_state_free(L);
+	lua_state_free(&lvm);
 	return 0;
 
 err_free_module:
 	lua_module_free(module);
 err_free_lua:
-	lua_state_free(L);
+	lua_state_free(&lvm);
 
 	return err;
 }
@@ -797,7 +902,7 @@ static void softirq_lvm_remove_module(struct work_struct *work)
 	 * changing the Lua VM environment.
 	 */
 	local_bh_disable();
-	err = lvm_remove_module(per_cpu(irq_lvms, cpu), module);
+	err = lvm_remove_module(per_cpu(irq_lvms, cpu)->L, module);
 	if (!err) {
 		atomic_inc(&work_ctx_remove_count);
 		__log_info("<%s>: err = [ OK ] \t<softirq-%d>, count = %d\n",
@@ -927,8 +1032,8 @@ int lua_module_unregister(const char *name)
 	}
 	mutex_unlock(&modules_mutex);
 
-	pr_info("Unregistered module <%s> from %d/%d Lua VMs, vm_inuse = %d\n",
-		name, count, nloaded, atomic_read(&vm_inuse));
+	pr_info("Unregistered module <%s> from %d/%d Lua VMs, vm_nusage = %d\n",
+		name, count, nloaded, atomic_read(&vm_nusage));
 
 	return err;
 }
@@ -959,114 +1064,30 @@ int modules_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-
-#ifdef CONFIG_SECURITY_LUA_LSM_STATISTICS
-
-int lua_lsm_status_show(struct seq_file *m, void *v)
-{
-	struct task_struct *g, *p;
-	unsigned int cpu;
-	int nalloc, nfree;
-	int inuse, total, minimum, maximum, avg;
-	int nbytes;
-	lua_State *L;
-
-	nalloc = atomic_read(&vm_nalloc);
-	nfree = atomic_read(&vm_nfree);
-	seq_printf(m, "Lua VM:\n");
-	seq_printf(m, "  Alloc:      alloc %d, free %d, inuse %d\n",
-		nalloc, nfree, nalloc - nfree);
-	seq_printf(m, "  Mem alloc:  alloc %d, realloc %d, free %d\n",
-		atomic_read(&mem_nalloc), atomic_read(&mem_nrealloc),
-		atomic_read(&mem_nfree));
-
-	inuse = 0;
-	total = 0;
-	minimum = INT_MAX;
-	maximum = 0;
-	mutex_lock(&modules_mutex);
-	read_lock(&tasklist_lock);
-	for_each_process_thread(g, p) {
-		L = lua_lsm_task(p)->L;
-		nbytes = lua_gc(L, LUA_GCCOUNT, 0) * 1024 + lua_gc(L, LUA_GCCOUNTB, 0);
-		inuse++;
-		total += nbytes;
-		minimum = min(minimum, nbytes);
-		maximum = max(maximum, nbytes);
-	}
-	read_unlock(&tasklist_lock);
-
-	cpus_read_lock();
-	for_each_possible_cpu(cpu) {
-		L = lua_lsm_task(idle_task(cpu))->L;
-		nbytes = lua_gc(L, LUA_GCCOUNT, 0) * 1024 + lua_gc(L, LUA_GCCOUNTB, 0);
-		inuse++;
-		total += nbytes;
-		minimum = min(minimum, nbytes);
-		maximum = max(maximum, nbytes);
-	}
-	cpus_read_unlock();
-	mutex_unlock(&modules_mutex);
-
-	avg = inuse ? total / inuse : 0;
-	seq_printf(m, "  Mem usage:  total %d, min %d, max %d, inuse %d, average %d\n",
-		total, minimum, maximum, inuse, avg);
-
-	kvcache_status(&nalloc, &nfree);
-	seq_printf(m, "kvcache:\n");
-	seq_printf(m, "  Alloc:      alloc %d, free %d, inuse %d\n",
-		nalloc, nfree, nalloc - nfree);
-
-	return 0;
-}
-
-int lsmhook_stat_show(struct seq_file *m, void *v)
-{
-	struct lua_lsm_hook_stat *stat;
-	int i = 1;
-
-	seq_printf(m, "stats for lua-lsm (ns)\n");
-	seq_printf(m, "%3s %-28s %4s %12s %15s %10s %12s\n",
-		"num", "name", "nlsm", "count", "total", "average", "maxtime");
-	seq_printf(m, "%s\n", TABLINE);
-
-	for (stat = lua_lsm_hook_stats; stat->name; stat++) {
-		int n = atomic_read(&stat->count);
-		s64 total = atomic64_read(&stat->time);
-		s64 maxtime = atomic64_read(&stat->maxtime);
-		seq_printf(m, "%3d %-28s %4d %12d %15llu %10llu %12llu\n",
-			i++, stat->name, atomic_read(&stat->nhooks),
-			n, total, n ? total / n : 0, maxtime);
-	}
-	return 0;
-}
-
-#endif
-
 /*********************************** main ***********************************/
 
 int lua_task_blob_init(struct task_struct *task)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	lua_State *L;
+	struct lvm_state *lvm = &llt->lvm;
+	int err;
 
 	kvcache_dict_init(&llt->dict);
 
-	L = lua_state_alloc(NULL);
-	if (IS_ERR(L))
-		return PTR_ERR(L);
+	refcount_init(&lvm->refcount, 0);
+	err = lua_state_alloc(lvm);
+	if (err)
+		return err;
 
-	llt->L = L;
-	refcount_init(&llt->refcount, 0);
 	return 0;
 }
 
 void lua_task_blob_free(struct task_struct *task)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	lua_modules_free(task, llt->L);
-	lua_state_free(llt->L);
-	llt->L = NULL;
+	struct lvm_state *lvm = &llt->lvm;
+	lua_modules_free(task, lvm->L);
+	lua_state_free(lvm);
 	kvcache_dict_free(&llt->dict);
 }
 
@@ -1106,7 +1127,7 @@ static const struct lsm_id lua_lsmid = {
 
 static int __init lua_lsm_init(void)
 {
-	lua_State *L;
+	struct lvm_state *lvm;
 	int cpu;
 	int err;
 
@@ -1115,10 +1136,15 @@ static int __init lua_lsm_init(void)
 		return err;
 
 	for_each_possible_cpu(cpu) {
-		L = lua_state_alloc(&irq_lvms_ud);
-		if (IS_ERR(L))
-			return PTR_ERR(L);
-		per_cpu(irq_lvms, cpu) = L;
+		lvm = kzalloc(sizeof(struct lvm_state), GFP_KERNEL);
+		if (lvm == NULL)
+			return -ENOMEM;
+
+		err = lua_state_alloc(lvm);
+		if (err)
+			return err;
+
+		per_cpu(irq_lvms, cpu) = lvm;
 	}
 
 	security_add_hooks(lua_lsm_hooks, ARRAY_SIZE(lua_lsm_hooks), &lua_lsmid);
