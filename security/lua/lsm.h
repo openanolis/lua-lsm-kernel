@@ -98,8 +98,8 @@ extern struct srcu_struct modules_ss;
 lua_State *lvm_get(void);
 void lvm_put(lua_State *L);
 
-int lua_module_register(const char *code, size_t len);
-int lua_module_unregister(const char *name);
+int lua_lsm_module_register(const char *code, size_t len);
+int lua_lsm_module_unregister(const char *name);
 
 int modules_show(struct seq_file *m, void *v);
 
@@ -203,8 +203,8 @@ static inline struct lua_lsm_object *lua_lsm_bdev(const struct block_device *bde
 	return bdev->bd_security + lua_lsm_blob_sizes.lbs_bdev;
 }
 
-int lua_task_blob_init(struct task_struct *task);
-void lua_task_blob_free(struct task_struct *task);
+int task_blob_init(struct task_struct *task);
+void task_blob_free(struct task_struct *task);
 
 /* lua C module */
 

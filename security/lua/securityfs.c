@@ -11,7 +11,7 @@
 #include "lsm.h"
 
 
-static bool lua_capable(int cap)
+static bool lua_lsm_capable(int cap)
 {
 	bool allow = true;
 	int rc;
@@ -49,16 +49,14 @@ static const struct file_operations fops_version = {
 	.release	= single_release,
 };
 
-
-static ssize_t register_write(struct file *file, const char __user *buf,
-			size_t len, loff_t *ppos)
+static ssize_t module_write(const char __user *buf, size_t len,
+			loff_t *ppos, int load)
 {
-	char *buffer;
+	char *buffer, *p;
 	int err;
 
-	__log_info("len = %d, %pD\n", (int)len, file);
-
-	if (!lua_capable(CAP_MAC_ADMIN))
+	__log_info("len = %d\n", (int)len);
+	if (!lua_lsm_capable(CAP_MAC_ADMIN))
 		return -EPERM;
 
 	/* No partial writes. */
@@ -71,64 +69,51 @@ static ssize_t register_write(struct file *file, const char __user *buf,
 	if (IS_ERR(buffer))
 		return PTR_ERR(buffer);
 
-	__log_info("buffer = %s [%d]\n", buffer, (int)len);
-	err = lua_module_register(buffer, len);
+	__log_info("buffer = [%d] %s\n", (int)len, buffer);
+	if (load) {
+		err = lua_lsm_module_register(buffer, len);
+	} else {
+		/* remove the tailing '\n' */
+		p = &buffer[len - 1];
+		while (p >= buffer && *p == '\n')
+			*p-- = '\0';
+
+		err = lua_lsm_module_unregister(buffer);
+	}
 	kfree(buffer);
 	if (err < 0)
 		return err;
 
 	return len;
+}
+
+static ssize_t register_write(struct file *file, const char __user *buf,
+			size_t len, loff_t *ppos)
+{
+	return module_write(buf, len, ppos, 1);
 }
 
 static const struct file_operations fops_register = {
 	.write		= register_write,
 };
 
-
 static ssize_t unregister_write(struct file *file, const char __user *buf,
 		size_t len, loff_t *ppos)
 {
-	char *buffer, *p;
-	int err;
-
-	if (!lua_capable(CAP_MAC_ADMIN))
-		return -EPERM;
-
-	/* No partial writes. */
-	if (*ppos != 0)
-		return -EINVAL;
-	if (len == 0)
-		return -EINVAL;
-
-	buffer = memdup_user_nul(buf, len);
-	if (IS_ERR(buffer))
-		return PTR_ERR(buffer);
-
-	/* remove the tailing '\n' */
-	p = &buffer[len - 1];
-	while (p >= buffer && *p == '\n')
-		*p-- = '\0';
-	__log_info("buffer = %s [%d]\n", buffer, (int)len);
-	err = lua_module_unregister(buffer);
-	kfree(buffer);
-	if (err < 0)
-		return err;
-
-	return len;
+	return module_write(buf, len, ppos, 0);
 }
 
 static const struct file_operations fops_unregister = {
 	.write		= unregister_write,
 };
 
-
-static int open_module(struct inode *inode, struct file *filp)
+static int open_modules(struct inode *inode, struct file *filp)
 {
 	return single_open(filp, modules_show, NULL);
 }
 
-static const struct file_operations fops_module = {
-	.open		= open_module,
+static const struct file_operations fops_modules = {
+	.open		= open_modules,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
 	.release	= single_release,
@@ -169,7 +154,7 @@ static const struct file_operations fops_lsm_funcs = {
 
 #endif
 
-static struct lua_file {
+static struct lua_lsm_file {
 	const char *name;
 	umode_t mode;
 	const struct file_operations *fops;
@@ -178,7 +163,7 @@ static struct lua_file {
 	{ "version",	0444,	&fops_version		},	/* r--r--r-- */
 	{ "register",	0222,	&fops_register		},	/* -w--w--w- */
 	{ "unregister",	0222,	&fops_unregister	},	/* -w--w--w- */
-	{ "module",	0444,	&fops_module		},	/* r--r--r-- */
+	{ "modules",	0444,	&fops_modules		},	/* r--r--r-- */
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
 	{ "stats",	0444,	&fops_stats		},	/* r--r--r-- */
 	{ "lsm_funcs",	0444,	&fops_lsm_funcs		},	/* r--r--r-- */
@@ -186,11 +171,11 @@ static struct lua_file {
 	{ NULL, 0, NULL }
 };
 
-static int __init lua_securityfs_init(void)
+static int __init lua_lsm_securityfs_init(void)
 {
 	struct dentry *dir;
 	struct dentry *dentry;
-	struct lua_file *file;
+	struct lua_lsm_file *file;
 
 	if (!lua_lsm_initialized)
 		return 0;
@@ -217,4 +202,4 @@ static int __init lua_securityfs_init(void)
 
 	return 0;
 }
-fs_initcall(lua_securityfs_init);
+fs_initcall(lua_lsm_securityfs_init);
