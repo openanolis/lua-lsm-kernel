@@ -331,12 +331,14 @@ static int kernel_random(lua_State *L)
 	case 1:
 		u = luaL_checkint(L, 1);
 		luaL_argcheck(L, 0 <= u, 1, "interval is empty");
-		r = get_random_u32_below((u32)u);
+		/* r: [1, u] */
+		r = get_random_u32_below((u32)u) + 1;
 		break;
 	case 2:
 		l = luaL_checkint(L, 1);
 		u = luaL_checkint(L, 2);
 		luaL_argcheck(L, l <= u, 2, "interval is empty");
+		/* r: [l, u] */
 		r = get_random_u32_inclusive((u32)l, (u32)u);
 		break;
 	default:
