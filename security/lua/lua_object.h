@@ -44,11 +44,12 @@
 		return lua_object_ ## fname(L, &ll->dict);					\
 	}
 
-#define LUA_OBJECT_FUNCS_DEFINE(name, ctype)							\
+#define LUA_OBJECT_FUNCS_DEFINE(name, ctype, has_kvcache)					\
 	static int rawmeth_ ## name ## _type(lua_State *L)					\
 	{											\
 		lua_pushstring(L, #name);							\
-		return 1;									\
+		lua_pushboolean(L, has_kvcache);						\
+		return 2;									\
 	}											\
 	static int rawmeth_ ## name ## _tostring(lua_State *L)					\
 	{											\
@@ -65,7 +66,7 @@
 	LUA_OBJECT_KVCACHE_FUNC(name, ctype, blob, kvcache_incr, incr)				\
 	LUA_OBJECT_KVCACHE_FUNC(name, ctype, blob, index, index)				\
 	LUA_OBJECT_KVCACHE_FUNC(name, ctype, blob, newindex, newindex)				\
-	LUA_OBJECT_FUNCS_DEFINE(name, ctype)							\
+	LUA_OBJECT_FUNCS_DEFINE(name, ctype, 1)							\
 	static inline void create_ ## name ## _meta(lua_State *L,				\
 				const luaL_Reg *funcs, const luaL_Reg *gc)			\
 	{											\
@@ -90,7 +91,7 @@
 	LUA_OBJECT_META_DEFINE(name, ctype, d, METHOD_NAME(name))				\
 	LUA_OBJECT_META_DEFINE(raw ## name, ctype, d, METHOD_NAME_RAW(name))			\
 	LUA_OBJECT_META_DEFINE(gc ## name, ctype, d, METHOD_NAME_GC(name))			\
-	LUA_OBJECT_FUNCS_DEFINE(name, ctype)							\
+	LUA_OBJECT_FUNCS_DEFINE(name, ctype, 0)							\
 	static inline void create_ ## name ## _meta(lua_State *L,				\
 				const luaL_Reg *funcs, const luaL_Reg *gc)			\
 	{											\
