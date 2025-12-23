@@ -67,14 +67,12 @@ static int capability_add(lua_State *L)
 		*newcap(L) = cap_combine(cap1, cap2);
 		settopfenvfrom(L, 1);
 		return 1;
-	} else if (tt == LUA_TNUMBER) {
-		int flag = luaL_checkint(L, 2);
-		cap_raise(cap1, flag);
+	} else {
+		int cap = arg2cap(L, 2);
+		cap_raise(cap1, cap);
 		*newcap(L) = cap1;
 		settopfenvfrom(L, 1);
 		return 1;
-	} else {
-		return 0;
 	}
 }
 
@@ -87,14 +85,12 @@ static int capability_sub(lua_State *L)
 		*newcap(L) = cap_drop(cap1, cap2);
 		settopfenvfrom(L, 1);
 		return 1;
-	} else if (tt == LUA_TNUMBER) {
-		int flag = luaL_checkint(L, 2);
-		cap_lower(cap1, flag);
+	} else {
+		int cap = arg2cap(L, 2);
+		cap_lower(cap1, cap);
 		*newcap(L) = cap1;
 		settopfenvfrom(L, 1);
 		return 1;
-	} else {
-		return 0;
 	}
 }
 
@@ -160,10 +156,7 @@ static int capability_cap_full(lua_State *L)
 
 static int capability_capable(lua_State *L)
 {
-	int cap = luaL_checkinteger(L, 1);
-	int err = cap_capable(current_cred(), &init_user_ns, cap, CAP_OPT_NONE);
-	lua_pushboolean(L, err == 0);
-	return 1;
+	return aux_capable(L, current_cred(), 1);
 }
 
 static const luaL_Reg capabilitylib[] = {

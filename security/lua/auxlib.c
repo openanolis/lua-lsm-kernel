@@ -13,10 +13,13 @@
 #include <linux/fs.h>
 #include <linux/string.h>
 #include <linux/errname.h>
+#include <linux/security.h>
+#include <linux/capability.h>
 #include <linux/lua.h>
 #include <linux/lauxlib.h>
 #include <linux/lualib.h>
 #include "auxlib.h"
+#include "lua_object.h"
 
 
 void lua_table_dump(lua_State *L, int idx, int level, int max)
@@ -461,4 +464,106 @@ int aux_dentry_path(lua_State *L, struct dentry *dentry, int rawpath)
 	if (buf)
 		kfree(buf);
 	return nres;
+}
+
+int arg2cap(lua_State *L, int idx)
+{
+	static const struct cflag_opt caps[] = {
+		{ "chown",              CAP_CHOWN		},
+		{ "dac_override",       CAP_DAC_OVERRIDE	},
+		{ "dac_read_search",    CAP_DAC_READ_SEARCH	},
+		{ "fowner",             CAP_FOWNER		},
+		{ "fsetid",             CAP_FSETID		},
+		{ "kill",               CAP_KILL		},
+		{ "setgid",             CAP_SETGID		},
+		{ "setuid",             CAP_SETUID		},
+		{ "setpcap",            CAP_SETPCAP		},
+		{ "linux_immutable",    CAP_LINUX_IMMUTABLE	},
+		{ "net_bind_service",   CAP_NET_BIND_SERVICE	},
+		{ "net_broadcast",      CAP_NET_BROADCAST	},
+		{ "net_admin",          CAP_NET_ADMIN		},
+		{ "net_raw",            CAP_NET_RAW		},
+		{ "ipc_lock",           CAP_IPC_LOCK		},
+		{ "ipc_owner",          CAP_IPC_OWNER		},
+		{ "sys_module",         CAP_SYS_MODULE		},
+		{ "sys_rawio",          CAP_SYS_RAWIO		},
+		{ "sys_chroot",         CAP_SYS_CHROOT		},
+		{ "sys_ptrace",         CAP_SYS_PTRACE		},
+		{ "sys_pacct",          CAP_SYS_PACCT		},
+		{ "sys_admin",          CAP_SYS_ADMIN		},
+		{ "sys_boot",           CAP_SYS_BOOT		},
+		{ "sys_nice",           CAP_SYS_NICE		},
+		{ "sys_resource",       CAP_SYS_RESOURCE	},
+		{ "sys_time",           CAP_SYS_TIME		},
+		{ "sys_tty_config",     CAP_SYS_TTY_CONFIG	},
+		{ "mknod",              CAP_MKNOD		},
+		{ "lease",              CAP_LEASE		},
+		{ "audit_write",        CAP_AUDIT_WRITE		},
+		{ "audit_control",      CAP_AUDIT_CONTROL	},
+		{ "setfcap",            CAP_SETFCAP		},
+		{ "mac_override",       CAP_MAC_OVERRIDE	},
+		{ "mac_admin",          CAP_MAC_ADMIN		},
+		{ "syslog",             CAP_SYSLOG		},
+		{ "wake_alarm",         CAP_WAKE_ALARM		},
+		{ "block_suspend",      CAP_BLOCK_SUSPEND	},
+		{ "audit_read",         CAP_AUDIT_READ		},
+		{ "perfmon",            CAP_PERFMON		},
+		{ "bpf",                CAP_BPF			},
+		{ "checkpoint_restore", CAP_CHECKPOINT_RESTORE	},
+		{ NULL, 0 }
+	};
+	int tt = lua_type(L, idx);
+	int cap;
+	switch (tt) {
+	case LUA_TNUMBER:
+		cap = luaL_checkinteger(L, idx);
+		break;
+	case LUA_TSTRING:
+		cap = (int)tocflags(L, idx, idx, caps, -1);
+		if (cap == -1)
+			return luaL_argerror(L, idx, "invalid capability");
+		break;
+	default:
+		return luaL_argerror(L, idx, "integer or string expected");
+	}
+	return cap;
+}
+
+/*
+ * [task:]capable(CAP_MAC_ADMIN)
+ * [task:]capable('mac_admin')
+ * [task:]capable(task, 'mac_admin')
+ * [task:]capable(task, 'mac_admin', 'noaudit', 'insetid')
+ */
+int aux_capable(lua_State *L, const struct cred *cred, int idx)
+{
+	static const struct cflag_opt opts[] = {
+		{ "noaudit",	CAP_OPT_NOAUDIT		},
+		{ "insetid",	CAP_OPT_INSETID		},
+		{ NULL, 0 }
+	};
+	unsigned int opt = CAP_OPT_NONE;
+	int top = lua_gettop(L);
+	int cap;
+	int err;
+
+	if (top < idx)
+		return luaL_error(L, "At least %d argument is required.", idx);
+
+	if (top == idx) {
+		cap = arg2cap(L, idx);
+		err = cap_capable(cred, current_user_ns(), cap, opt);
+	} else {
+		struct task_struct *task = totask(L, idx);
+		cap = arg2cap(L, idx + 1);
+		if (top >= idx + 2)
+			opt = tocflags(L, idx + 2, top, opts, CAP_OPT_NONE);
+
+		rcu_read_lock();
+		err = cap_capable(cred, __task_cred(task)->user_ns, cap, opt);
+		rcu_read_unlock();
+	}
+
+	lua_pushboolean(L, err == 0);
+	return 1;
 }

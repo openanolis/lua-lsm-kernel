@@ -1990,11 +1990,20 @@ LUA_LSM_INT_DEFINE4(task_kill, struct task_struct *, p,
 LUA_LSM_INT_DEFINE5(task_prctl, int, option, unsigned long, arg2,
 		unsigned long, arg3, unsigned long, arg4, unsigned long, arg5)
 {
-	lua_pushinteger(L, (lua_Integer)option);
-	lua_pushnumber(L, (lua_Number)arg2);
-	lua_pushnumber(L, (lua_Number)arg3);
-	lua_pushnumber(L, (lua_Number)arg4);
-	lua_pushnumber(L, (lua_Number)arg5);
+	switch (option) {
+	case PR_SET_PTRACER:
+		lua_pushstring(L, "set_ptracer");
+		lua_pushinteger(L, (lua_Integer)arg2);
+		break;
+
+	default:
+		lua_pushinteger(L, (lua_Integer)option);
+		lua_pushnumber(L, (lua_Number)arg2);
+		lua_pushnumber(L, (lua_Number)arg3);
+		lua_pushnumber(L, (lua_Number)arg4);
+		lua_pushnumber(L, (lua_Number)arg5);
+		break;
+	}
 }
 
 /**
@@ -2727,7 +2736,7 @@ LUA_LSM_INT_DEFINE3(socket_getpeersec_dgram, struct socket *, sock,
 		struct sk_buff *, skb, u32 *, secid)
 {
 	*newsocket(L) = sock;
-	*newskb(L) = skb;
+	skb ? *newskb(L) = skb : lua_pushnil(L);
 	lua_pushnil(L);	/* TODO: secid */
 }
 

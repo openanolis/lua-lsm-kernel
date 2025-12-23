@@ -84,4 +84,7 @@ void setconst(lua_State *L, const struct const_value *cv);
 int aux_file_path(lua_State *L, struct file *filp);
 int aux_dentry_path(lua_State *L, struct dentry *dentry, int rawpath);
 
+int arg2cap(lua_State *L, int idx);
+int aux_capable(lua_State *L, const struct cred *cred, int idx);
+
 #endif /* ! _SECURITY_LUA_LSM_AUXLIB_H */

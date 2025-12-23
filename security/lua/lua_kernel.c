@@ -200,14 +200,18 @@ static int kernel_task_same_thread_group(lua_State *L)
 	return 1;
 }
 
-static int kernel_task_ptrace_parent(lua_State *L)
+static int kernel_task_same_group_ptracer(lua_State *L)
 {
-	struct task_struct *task = totask(L, 1);
-	struct task_struct *parent = ptrace_parent(task);
-	if (parent == NULL)
-		return 0;
-	*newtask(L) = parent;
-	settopfenvfrom(L, 1);
+	struct task_struct *tracee = totask(L, 1);
+	struct task_struct *tracer = totask(L, 2);
+	struct task_struct *parent;
+	int res = 0;
+	rcu_read_lock();
+	parent = ptrace_parent(tracee);
+	if (parent && same_thread_group(parent, tracer))
+		res = 1;
+	rcu_read_unlock();
+	lua_pushboolean(L, res);
 	return 1;
 }
 
@@ -258,6 +262,57 @@ static int kernel_task_cmdline(lua_State *L)
 	return 1;
 }
 
+static int kernel_task_capable(lua_State *L)
+{
+	struct task_struct *task = totask(L, 1);
+	int nres;
+	rcu_read_lock();
+	nres = aux_capable(L, __task_cred(task), 2);
+	rcu_read_unlock();
+	return nres;
+}
+
+static int kernel_task_is_descendant(lua_State *L)
+{
+	struct task_struct *child = totask(L, 1);
+	struct task_struct *parent;
+	int tt = lua_type(L, 2);
+	int res = 0;
+
+	switch (tt) {
+	case LUA_TNUMBER:
+		parent = find_get_task_by_vpid((pid_t)lua_tointeger(L, 2));
+		if (parent == NULL)
+			return luaL_argerror(L, 2, "invalid pid");
+		break;
+	case LUA_TUSERDATA:
+		parent = totask(L, 2);
+		break;
+	default:
+		return luaL_argerror(L, 2, "task or pid expected");
+	}
+
+	rcu_read_lock();
+	if (!thread_group_leader(parent))
+		parent = rcu_dereference(parent->group_leader);
+	while (child->pid > 0) {
+		if (!thread_group_leader(child))
+			child = rcu_dereference(child->group_leader);
+		if (child == parent) {
+			res = 1;
+			break;
+		}
+		child = rcu_dereference(child->real_parent);
+	}
+	rcu_read_unlock();
+
+	if (tt == LUA_TNUMBER)
+		put_task_struct(parent);
+
+	lua_pushboolean(L, res);
+	return 1;
+}
+
 static int meth_task_tostring(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
@@ -273,12 +328,30 @@ static const luaL_Reg task_meth[] = {
 	{ "group_leader",		kernel_task_group_leader	},
 	{ "thread_group_leader",	kernel_task_thread_group_leader	},
 	{ "same_thread_group",		kernel_task_same_thread_group	},
-	{ "ptrace_parent",		kernel_task_ptrace_parent	},
+	{ "same_group_ptracer",		kernel_task_same_group_ptracer	},
 	{ "is_idle",			kernel_task_is_idle		},
 	{ "exe_file",			kernel_task_exe_file		},
 	{ "exepath",			kernel_task_exepath		},
 	{ "cmdline",			kernel_task_cmdline		},
+	{ "capable",			kernel_task_capable		},
+	{ "is_descendant",		kernel_task_is_descendant	},
 	{ "__tostring",			meth_task_tostring		},
+	{ NULL, NULL }
+};
+
+static int meth_task_gc(lua_State *L)
+{
+	struct task_struct **taskp = togctaskp(L, 1);
+	if (*taskp) {
+		put_task_struct(*taskp);
+		*taskp = NULL;
+	}
+	return 0;
+}
+
+static const luaL_Reg task_gc_meth[] = {
+	{ "__tostring",			meth_task_tostring		},
+	{ "__gc",			meth_task_gc			},
 	{ NULL, NULL }
 };
 
@@ -360,6 +433,31 @@ static int kernel_ktime_seconds(lua_State *L)
 	return 1;
 }
 
+static int kernel_rcu_read_lock(lua_State *L)
+{
+	rcu_read_lock();
+	return 0;
+}
+
+static int kernel_rcu_read_unlock(lua_State *L)
+{
+	rcu_read_unlock();
+	return 0;
+}
+
+static int kernel_task_from_pid(lua_State *L)
+{
+	pid_t nr = (pid_t)luaL_checkinteger(L, 1);
+	struct task_struct *task = find_get_task_by_vpid(nr);
+	if (task == NULL)
+		return 0;
+	*newgctask(L) = task;
+	/* FIXME
+	settopfenvfrom(L, 1);
+	*/
+	return 1;
+}
+
 static int kernel_printk(lua_State *L)
 {
 	const char *s = luaL_checkstring(L, 1);
@@ -396,6 +494,9 @@ static const luaL_Reg kernellib[] = {
 	{ "lsm_funcs",		kernel_lsm_funcs	},
 	{ "random",		kernel_random		},
 	{ "ktime_seconds",	kernel_ktime_seconds	},
+	{ "rcu_read_lock",	kernel_rcu_read_lock	},
+	{ "rcu_read_unlock",	kernel_rcu_read_unlock	},
+	{ "task_from_pid",	kernel_task_from_pid	},
 	{ "printk",		kernel_printk		},
 
 #define XX(name)    { "pr_" #name, kernel_pr_ ## name },
@@ -408,7 +509,7 @@ static const luaL_Reg kernellib[] = {
 LUALIB_API int luaopen_kernel(lua_State *L)
 {
 	luaL_newlib(L, kernellib);
-	create_task_meta(L, task_meth, NULL);
+	create_task_meta(L, task_meth, task_gc_meth);
 	create_cred_meta(L, cred_meth, NULL);
 	create_perfevent_meta(L, NULL, NULL);
 	create_ipc_meta(L, NULL, NULL);

@@ -8,6 +8,7 @@
 #include "debug.h"
 #include <linux/slab.h>
 #include <linux/string.h>
+#include <linux/errname.h>
 #include <linux/rwlock.h>
 #include <linux/lua.h>
 #include <linux/lualib.h>
@@ -61,18 +62,8 @@ RB_GENERATE_STATIC(kvcache, kvcache_node, node, kvcache_node_cmp);
 
 static int kvcache_result(lua_State *L, int err)
 {
-	const char *error;
-
-	switch (err) {
-	case -ENOMEM:	error = "no memory";	break;
-	case -EINVAL:	error = "invalid";	break;
-	case -ERANGE:	error = "no space";	break;
-	case -ESRCH:	error = "no module";	break;
-	case -EEXIST:	error = "exists";	break;
-	default:	error = "unknown";	break;
-	}
 	lua_pushnil(L);
-	lua_pushstring(L, error);
+	lua_pushstring(L, errname(err) ?: "unknown");
 	return 2;
 }
 

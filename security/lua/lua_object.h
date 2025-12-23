@@ -9,6 +9,8 @@
 #define _SECURITY_LUA_LSM_LUA_OBJECT_H
 
 #include "auxlib.h"
+#include "lsm.h"
+#include "kvcache.h"
 
 #define METHOD_NAME(name)	("method." #name)
 #define METHOD_NAME_RAW(name)	("method." #name ".raw")
