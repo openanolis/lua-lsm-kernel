@@ -2885,12 +2885,12 @@ LUA_LSM_VOID_DEFINE2(req_classify_flow, const struct request_sock *, req,
 }
 
 /**
- * TODO: tun_dev_alloc_security
+ * tun_dev_alloc_security
  * Default: 0
  */
 LUA_LSM_INT_DEFINE1(tun_dev_alloc_security, void *, security)
 {
-	lua_pushnil(L);	/* TODO: security */
+	*newtundev(L) = security;
 }
 
 /**
@@ -2903,31 +2903,31 @@ LUA_LSM_INT_DEFINE0(tun_dev_create)
 }
 
 /**
- * TODO: tun_dev_attach_queue
+ * tun_dev_attach_queue
  * Default: 0
  */
 LUA_LSM_INT_DEFINE1(tun_dev_attach_queue, void *, security)
 {
-	lua_pushnil(L);	/* TODO: security */
+	*newtundev(L) = security;
 }
 
 /**
- * TODO: tun_dev_attach
+ * tun_dev_attach
  * Default: 0
  */
 LUA_LSM_INT_DEFINE2(tun_dev_attach, struct sock *, sk, void *, security)
 {
 	*newsock(L) = sk;
-	lua_pushnil(L);	/* TODO: security */
+	*newtundev(L) = security;
 }
 
 /**
- * TODO: tun_dev_open
+ * tun_dev_open
  * Default: 0
  */
 LUA_LSM_INT_DEFINE1(tun_dev_open, void *, security)
 {
-	lua_pushnil(L);	/* TODO: security */
+	*newtundev(L) = security;
 }
 
 /**
@@ -2991,35 +2991,35 @@ LUA_LSM_INT_DEFINE2(mptcp_add_subflow, struct sock *, sk, struct sock *, ssk)
 #ifdef CONFIG_SECURITY_INFINIBAND
 
 /**
- * TODO: ib_pkey_access
+ * ib_pkey_access
  * Default: 0
  */
 LUA_LSM_INT_DEFINE3(ib_pkey_access, void *, sec, u64, subnet_prefix, u16, pkey)
 {
-	lua_pushnil(L);	/* TODO: sec */
+	*newib(L) = sec;
 	lua_pushnumber(L, (lua_Number)subnet_prefix);
 	lua_pushinteger(L, (lua_Integer)pkey);
 }
 
 /**
- * TODO: ib_endport_manage_subnet
+ * ib_endport_manage_subnet
  * Default: 0
  */
 LUA_LSM_INT_DEFINE3(ib_endport_manage_subnet, void *, sec,
 		const char *, dev_name, u8, port_num)
 {
-	lua_pushnil(L);	/* TODO: sec */
+	*newib(L) = sec;
 	lua_pushstring(L, dev_name);
 	lua_pushinteger(L, (lua_Integer)port_num);
 }
 
 /**
- * TODO: ib_alloc_security
+ * ib_alloc_security
  * Default: 0
  */
 LUA_LSM_INT_DEFINE1(ib_alloc_security, void *, sec)
 {
-	lua_pushnil(L);	/* TODO: sec */
+	*newib(L) = sec;
 }
 
 #endif /* CONFIG_SECURITY_INFINIBAND */

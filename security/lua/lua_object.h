@@ -118,14 +118,16 @@
 #define LUA_OBJECTS_LIST									\
 	LUA_OBJECT(task,	kernel,		task,		struct task_struct *,	NULL)	\
 	LUA_OBJECT(object,	kernel,		cred,		struct cred *,		NULL)	\
-	LUA_OBJECT(object,	kernel,		perfevent,	struct perf_event *,	NULL)	\
+	LUA_OBJECT(func,	kernel,		perfevent,	struct perf_event *,	NULL)	\
 	LUA_OBJECT(object,	ipc,		ipc,		struct kern_ipc_perm *,	NULL)	\
 	LUA_OBJECT(object,	ipc,		msgmsg,		struct msg_msg *,	NULL)	\
 	LUA_OBJECT(object,	net,		sock,		struct sock *,		NULL)	\
+	LUA_OBJECT(func,	net,		ib,		void *,			NULL)	\
+	LUA_OBJECT(func,	net,		tundev,		void *,			NULL)	\
 	LUA_OBJECT(func,	net,		socket,		struct socket *,	NULL)	\
 	LUA_OBJECT(func,	net,		skb,		struct sk_buff *,	NULL)	\
 	LUA_OBJECT(func,	net,		sockaddr,	struct sockaddr *,	NULL)	\
-	LUA_OBJECT(object,	security,	key,		struct key *,		NULL)	\
+	LUA_OBJECT(func,	security,	key,		struct key *,		NULL)	\
 	LUA_OBJECT(object,	block,		bdev,		struct block_device *,	NULL)	\
 	LUA_OBJECT(object,	fs,		inode,		struct inode *,		NULL)	\
 	LUA_OBJECT(object,	fs,		file,		struct file *,		NULL)	\

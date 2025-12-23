@@ -15,6 +15,7 @@
 #include <net/sock.h>
 #include <linux/lsm_hooks.h>
 #include <linux/spinlock.h>
+#include <linux/perf_event.h>
 #include <linux/lua.h>
 #include "bitmap.h"
 #include "kvcache.h"
@@ -188,9 +189,9 @@ static inline struct lua_lsm_object *lua_lsm_msgmsg(const struct msg_msg *msg)
 	return msg->security + lua_lsm_blob_sizes.lbs_msg_msg;
 }
 
-static inline struct lua_lsm_object *lua_lsm_perfevent(void *perf_event)
+static inline struct lua_lsm_object *lua_lsm_perfevent(const struct perf_event *event)
 {
-	return perf_event + lua_lsm_blob_sizes.lbs_perf_event;
+	return event->security + lua_lsm_blob_sizes.lbs_perf_event;
 }
 
 static inline struct lua_lsm_object *lua_lsm_tun_dev(void *security)

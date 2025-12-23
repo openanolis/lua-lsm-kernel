@@ -1090,21 +1090,28 @@ void task_blob_free(struct task_struct *task)
 	kvcache_dict_free(&llt->dict);
 }
 
+/*
+ * TODO: Currently, the key, perf_event, tun_dev, and ib objects do not
+ * have corresponding free LSM callback functions, which prevents object
+ * properties from being released. Therefore, setting properties for these
+ * four objects is not supported at this time, as this requires support at
+ * the security subsystem architecture.
+ */
 struct lsm_blob_sizes lua_lsm_blob_sizes __ro_after_init = {
 	.lbs_task = sizeof(struct lua_lsm_task),
 	.lbs_cred = sizeof(struct lua_lsm_object),
 	.lbs_file = sizeof(struct lua_lsm_object),
-	.lbs_ib = sizeof(struct lua_lsm_object),
+	.lbs_ib = 0,
 	.lbs_inode = sizeof(struct lua_lsm_object),
 	.lbs_sock = sizeof(struct lua_lsm_object),
 	.lbs_superblock = sizeof(struct lua_lsm_object),
 	.lbs_ipc = sizeof(struct lua_lsm_object),
-	.lbs_key = sizeof(struct lua_lsm_object),
+	.lbs_key = 0,
 	.lbs_msg_msg = sizeof(struct lua_lsm_object),
-	.lbs_perf_event = sizeof(struct lua_lsm_object),
+	.lbs_perf_event = 0,
 	/* TODO: number of xattr slots in new_xattrs array */
 	.lbs_xattr_count = 10,
-	.lbs_tun_dev = sizeof(struct lua_lsm_object),
+	.lbs_tun_dev = 0,
 	.lbs_bdev = sizeof(struct lua_lsm_object),
 };
 
