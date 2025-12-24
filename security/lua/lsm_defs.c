@@ -16,6 +16,7 @@
 #include <linux/compiler.h>
 #include <linux/rwlock.h>
 #include <linux/cred.h>
+#include <linux/prctl.h>
 #include <linux/syscalls.h>     /* for __MAP */
 #include <linux/timekeeping.h>  /* for ktime_get */
 #include <net/ipv6.h>
