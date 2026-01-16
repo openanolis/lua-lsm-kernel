@@ -833,15 +833,15 @@ LUA_LSM_INT_NAKED_DEFINE5(inode_init_security, struct inode *, inode,
 }
 
 /**
- * TODO: inode_init_security_anon
+ * inode_init_security_anon
  * Default: 0
  */
 LUA_LSM_INT_DEFINE3(inode_init_security_anon, struct inode *, inode,
 		const struct qstr *, name, const struct inode *, context_inode)
 {
 	*newinode(L) = inode;
-	lua_pushnil(L);	/* TODO: name */
-	*(const struct inode **)newinode(L) = context_inode;
+	lua_pushlstring(L, name->name, name->len);
+	context_inode ? *(const struct inode **)newinode(L) = context_inode : lua_pushnil(L);
 }
 
 /**

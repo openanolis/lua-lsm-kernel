@@ -313,6 +313,13 @@ static int kernel_task_is_descendant(lua_State *L)
 	return 1;
 }
 
+static int kernel_task_pid_alive(lua_State *L)
+{
+	struct task_struct *task = totask(L, 1);
+	lua_pushboolean(L, pid_alive(task));
+	return 1;
+}
+
 static int meth_task_tostring(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
@@ -335,6 +342,7 @@ static const luaL_Reg task_meth[] = {
 	{ "cmdline",			kernel_task_cmdline		},
 	{ "capable",			kernel_task_capable		},
 	{ "is_descendant",		kernel_task_is_descendant	},
+	{ "pid_alive",			kernel_task_pid_alive		},
 	{ "__tostring",			meth_task_tostring		},
 	{ NULL, NULL }
 };
