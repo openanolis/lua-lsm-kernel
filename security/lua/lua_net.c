@@ -284,15 +284,21 @@ static int meth_sockaddr_tostring(lua_State *L)
 	int l;
 	switch (sa->sa_family) {
 	case AF_INET:
-		l = snprintf(buffer, sizeof(buffer), "inet: %pISpc", sa);
+		l = snprintf(buffer, sizeof(buffer), "sa.inet: %pISpc", sa);
 		lua_pushlstring(L, buffer, l);
 		break;
 	case AF_INET6:
-		l = snprintf(buffer, sizeof(buffer), "inet6: %pISpc", sa);
+		l = snprintf(buffer, sizeof(buffer), "sa.inet6: %pISpc", sa);
 		lua_pushlstring(L, buffer, l);
 		break;
 	case AF_UNIX:
-		lua_pushfstring(L, "unix: %s", ((struct sockaddr_un *)sa)->sun_path);
+		lua_pushfstring(L, "sa.unix: %s", ((struct sockaddr_un *)sa)->sun_path);
+		break;
+	case AF_NETLINK:
+		lua_pushfstring(L, "sa.netlink: %d", ((struct sockaddr_nl *)sa)->nl_pid);
+		break;
+	default:
+		lua_pushfstring(L, "sa.%s", family_tostring(sa->sa_family) ?: "(unknown)");
 		break;
 	}
 	return 1;
