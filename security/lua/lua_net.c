@@ -48,7 +48,6 @@ static int net_sock_socket(lua_State *L)
 {
 	struct sock *sk = tosock(L, 1);
 	*newsocket(L) = sk->sk_socket;
-	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -159,7 +158,6 @@ static int net_socket_sock(lua_State *L)
 {
 	struct socket *sock = tosocket(L, 1);
 	*newsock(L) = sock->sk;
-	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -167,7 +165,6 @@ static int net_socket_inode(lua_State *L)
 {
 	struct socket *sock = tosocket(L, 1);
 	*newinode(L) = SOCK_INODE(sock);
-	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -184,7 +181,6 @@ static int net_skb_sock(lua_State *L)
 {
 	struct sk_buff *skb = toskb(L, 1);
 	*newsock(L) = skb->sk;
-	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -192,7 +188,6 @@ static int net_skb_full_sk(lua_State *L)
 {
 	struct sk_buff *skb = toskb(L, 1);
 	*newsock(L) = skb_to_full_sk(skb);
-	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -318,7 +313,6 @@ static int net_sock_alloc(lua_State *L)
 	*sockp = sock_alloc();
 	if (*sockp == NULL)
 		return 0;
-	/* TODO: settopfenvfrom(L, 1); */
 	return 1;
 }
 

@@ -195,12 +195,6 @@ void luaL_requiref(lua_State *L, const char *modname,
 	}
 }
 
-void settopfenvfrom(lua_State *L, int from)
-{
-	lua_getfenv(L, from);
-	lua_setfenv(L, -2);
-}
-
 unsigned int tocflags(lua_State *L, int idx, int top,
 		const struct cflag_opt *opts, unsigned int d)
 {

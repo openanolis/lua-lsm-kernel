@@ -348,7 +348,7 @@ static int module_load(lua_State *L, struct lua_lsm_module *module)
 	lua_pushlightuserdata(L, MODULE_KEY);
 	lua_pushlightuserdata(L, module);
 	lua_settable(L, -3);			/* env.MODULE_KEY = module */
-	*newtask(L) = current;
+	*newtask_nomain(L) = current;
 	lua_setfield(L, -2, "current");		/* env.current = current */
 
 	lua_newtable(L);			/* shared table */

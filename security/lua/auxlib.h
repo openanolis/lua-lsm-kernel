@@ -44,8 +44,6 @@ int lua_pcall_wrap(lua_State *L, int nargs, int nresults, int errfunc);
 void luaL_requiref(lua_State *L, const char *modname,
 		lua_CFunction openf, int glb);
 
-void settopfenvfrom(lua_State *L, int from);
-
 struct cflag_opt {
 	const char *name;
 	unsigned int flag;

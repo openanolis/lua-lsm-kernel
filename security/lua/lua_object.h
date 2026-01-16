@@ -12,17 +12,27 @@
 #include "lsm.h"
 #include "kvcache.h"
 
+#define CURR_ENV	"_CURR_ENV"
+
 #define METHOD_NAME(name)	("method." #name)
 #define METHOD_NAME_RAW(name)	("method." #name ".raw")
 #define METHOD_NAME_GC(name)	("method." #name ".gc")
 
 #define LUA_OBJECT_META_DEFINE(name, ctype, d, metaname)					\
-	static inline ctype *new ## name(lua_State *L)						\
+	static inline ctype *new ## name ## _nomain(lua_State *L)				\
 	{											\
 		ctype *p = (ctype *)lua_newuserdata(L, sizeof(ctype));				\
 		*p = d;										\
 		luaL_getmetatable(L, metaname);							\
 		lua_setmetatable(L, -2);							\
+		return p;									\
+	}											\
+	/* Calling from the Main chunk requires setting the correct fenv. */			\
+	static inline ctype *new ## name(lua_State *L)						\
+	{											\
+		ctype *p = new ## name ## _nomain(L);						\
+		lua_getfield(L, LUA_REGISTRYINDEX, CURR_ENV);					\
+		lua_setfenv(L, -2);								\
 		return p;									\
 	}											\
 	static inline ctype *to ## name ## p(lua_State *L, int idx)				\

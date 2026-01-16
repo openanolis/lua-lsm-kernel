@@ -67,7 +67,6 @@ static int fs_dentry_backing_inode(lua_State *L)
 {
 	struct dentry *dentry = todentry(L, 1);
 	*newinode(L) = d_backing_inode(dentry);
-	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -242,7 +241,6 @@ static int fs_file_dentry(lua_State *L)
 {
 	const struct file *file = tofile(L, 1);
 	*newdentry(L) = file_dentry(file);
-	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -250,7 +248,6 @@ static int fs_file_inode(lua_State *L)
 {
 	struct file *file = tofile(L, 1);
 	*newinode(L) = file_inode(file);
-	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -352,8 +349,6 @@ static const luaL_Reg fs_file_gc_meth[] = {
 		struct linux_binprm *bprm = tobinprm(L, 1);		\
 		if (bprm->name) {					\
 			*new ## type(L) = bprm->name;			\
-			/* setfenv(file, getfenv(binprm)) */		\
-			settopfenvfrom(L, 1);				\
 			return 1;					\
 		} else {						\
 			return 0;					\
@@ -379,7 +374,6 @@ static int fs_path_vfsmount(lua_State *L)
 {
 	struct path *path = topath(L, 1);
 	*newvfsmount(L) = path->mnt;
-	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -387,7 +381,6 @@ static int fs_path_dentry(lua_State *L)
 {
 	struct path *path = topath(L, 1);
 	*newdentry(L) = path->dentry;
-	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -431,7 +424,6 @@ static int fs_superblock_root(lua_State *L)
 {
 	struct super_block *sb = tosuperblock(L, 1);
 	*newdentry(L) = sb->s_root;
-	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -486,7 +478,6 @@ static int fs_vfsmount_superblock(lua_State *L)
 {
 	struct vfsmount *mnt = tovfsmount(L, 1);
 	*newsuperblock(L) = mnt->mnt_sb;
-	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -494,7 +485,6 @@ static int fs_vfsmount_mntidmap(lua_State *L)
 {
 	struct vfsmount *mnt = tovfsmount(L, 1);
 	*newmntidmap(L) = mnt_idmap(mnt);
-	settopfenvfrom(L, 1);
 	return 1;
 }
 
@@ -543,7 +533,6 @@ static int fs_filp_open(lua_State *L)
 		lua_pushinteger(L, PTR_ERR(*filp));
 		return 2;
 	}
-	/* TODO: settopfenvfrom(L, 1); */
 	return 1;
 }
 

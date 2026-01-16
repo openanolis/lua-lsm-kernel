@@ -146,7 +146,7 @@
 			if (lua_isfunction(L, -1)) {					\
 				int top = lua_gettop(L);				\
 				lua_getfenv(L, -1);					\
-				lua_setfenv(L, -6);	/* thread.fenv = lfunc.fenv */	\
+				lua_setfield(L, LUA_REGISTRYINDEX, CURR_ENV);		\
 				ASSIGN_FROM_FUNC_ ## vmtype(ret)			\
 					__lua_lsm_vm_ ## NAME(L __VA_OPT__(,)		\
 						__MAP(x, __SC_ARGS, __VA_ARGS__));	\
@@ -157,6 +157,8 @@
 			lua_pop(L, 1);			/* pop _M */			\
 			RET_CHECK_ ## rettype(NAME, ret);				\
 		}									\
+		lua_pushnil(L);								\
+		lua_setfield(L, LUA_REGISTRYINDEX, CURR_ENV);				\
 		lua_pop(L, 4);								\
 		lvm_put(L);								\
 		return ret;								\
