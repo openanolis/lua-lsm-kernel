@@ -81,9 +81,9 @@ static atomic_t vm_nusage = ATOMIC_INIT(0);
 
 static atomic_t vm_nalloc = ATOMIC_INIT(0);
 static atomic_t vm_nfree = ATOMIC_INIT(0);
-static atomic_t mem_nalloc = ATOMIC_INIT(0);
-static atomic_t mem_nrealloc = ATOMIC_INIT(0);
-static atomic_t mem_nfree = ATOMIC_INIT(0);
+static atomic64_t mem_nalloc = ATOMIC64_INIT(0);
+static atomic64_t mem_nrealloc = ATOMIC64_INIT(0);
+static atomic64_t mem_nfree = ATOMIC64_INIT(0);
 static atomic_t mem_total = ATOMIC_INIT(0);
 static atomic_t mem_minimum = ATOMIC_INIT(INT_MAX);
 static atomic_t mem_maximum = ATOMIC_INIT(0);
@@ -107,16 +107,16 @@ static void lvm_stats_memalloc(struct lvm_state *lvm, void *ptr,
 	int minimum, maximum, nbytes;
 
 	if (nsize == 0) {
-		atomic_inc(&mem_nfree);
-		atomic_inc(&lvm->nfree);
+		atomic64_inc(&mem_nfree);
+		atomic64_inc(&lvm->nfree);
 		atomic_sub((int)osize, &mem_total);
 	} else {
 		if (ptr) {
-			atomic_inc(&mem_nrealloc);
-			atomic_inc(&lvm->nrealloc);
+			atomic64_inc(&mem_nrealloc);
+			atomic64_inc(&lvm->nrealloc);
 		} else {
-			atomic_inc(&mem_nalloc);
-			atomic_inc(&lvm->nalloc);
+			atomic64_inc(&mem_nalloc);
+			atomic64_inc(&lvm->nalloc);
 		}
 
 		atomic_add(nsize - osize, &mem_total);
@@ -143,16 +143,16 @@ void lvm_stats_show(struct seq_file *m)
 	int total = atomic_read(&mem_total);
 	int average = nusage ? total / nusage : 0;
 
-	seq_printf(m, "lvm.nalloc\t= %9d\n", atomic_read(&vm_nalloc));
-	seq_printf(m, "lvm.nfree\t= %9d\n", atomic_read(&vm_nfree));
-	seq_printf(m, "lvm.nusage\t= %9d\n", nusage);
-	seq_printf(m, "lmem.nalloc\t= %9d\n", atomic_read(&mem_nalloc));
-	seq_printf(m, "lmem.nrealloc\t= %9d\n", atomic_read(&mem_nrealloc));
-	seq_printf(m, "lmem.nfree\t= %9d\n", atomic_read(&mem_nfree));
-	seq_printf(m, "lmem.total\t= %9d\n", total);
-	seq_printf(m, "lmem.average\t= %9d\n", average);
-	seq_printf(m, "lmem.minimum\t= %9d\n", atomic_read(&mem_minimum));
-	seq_printf(m, "lmem.maximum\t= %9d\n", atomic_read(&mem_maximum));
+	seq_printf(m, "lvm.nalloc\t= %12d\n", atomic_read(&vm_nalloc));
+	seq_printf(m, "lvm.nfree\t= %12d\n", atomic_read(&vm_nfree));
+	seq_printf(m, "lvm.nusage\t= %12d\n", nusage);
+	seq_printf(m, "lmem.nalloc\t= %12lld\n", atomic64_read(&mem_nalloc));
+	seq_printf(m, "lmem.nrealloc\t= %12lld\n", atomic64_read(&mem_nrealloc));
+	seq_printf(m, "lmem.nfree\t= %12lld\n", atomic64_read(&mem_nfree));
+	seq_printf(m, "lmem.total\t= %12d\n", total);
+	seq_printf(m, "lmem.average\t= %12d\n", average);
+	seq_printf(m, "lmem.minimum\t= %12d\n", atomic_read(&mem_minimum));
+	seq_printf(m, "lmem.maximum\t= %12d\n", atomic_read(&mem_maximum));
 }
 
 int lsm_funcs_show(struct seq_file *m, void *v)

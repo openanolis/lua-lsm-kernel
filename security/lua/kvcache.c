@@ -20,27 +20,27 @@
 
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
 
-static atomic_t node_nalloc = ATOMIC_INIT(0);
-static atomic_t node_nfree = ATOMIC_INIT(0);
-static atomic_t node_nusage = ATOMIC_INIT(0);
+static atomic64_t node_nalloc = ATOMIC_INIT(0);
+static atomic64_t node_nfree = ATOMIC_INIT(0);
+static atomic64_t node_nusage = ATOMIC_INIT(0);
 
 static void kvcache_stats_alloc(void)
 {
-	atomic_inc(&node_nalloc);
-	atomic_inc(&node_nusage);
+	atomic64_inc(&node_nalloc);
+	atomic64_inc(&node_nusage);
 }
 
 static void kvcache_stats_free(void)
 {
-	atomic_inc(&node_nfree);
-	atomic_dec(&node_nusage);
+	atomic64_inc(&node_nfree);
+	atomic64_dec(&node_nusage);
 }
 
 void kvcache_stats_show(struct seq_file *m)
 {
-	seq_printf(m, "kvcache.nalloc\t= %9d\n", atomic_read(&node_nalloc));
-	seq_printf(m, "kvcache.nfree\t= %9d\n", atomic_read(&node_nfree));
-	seq_printf(m, "kvcache.nusage\t= %9d\n", atomic_read(&node_nusage));
+	seq_printf(m, "kvcache.nalloc\t= %12lld\n", atomic64_read(&node_nalloc));
+	seq_printf(m, "kvcache.nfree\t= %12lld\n", atomic64_read(&node_nfree));
+	seq_printf(m, "kvcache.nusage\t= %12lld\n", atomic64_read(&node_nusage));
 }
 
 #else
