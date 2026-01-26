@@ -199,11 +199,126 @@ static inline void lvm_stats_memalloc(struct lvm_state *lvm, void *ptr,
 
 static DEFINE_PER_CPU(struct lvm_state *, irq_lvms);
 
+static int lua_state_alloc(struct lvm_state *lvm);
+static void lua_state_free(struct lvm_state *lvm);
+
+#define LVM_POOL_MAX	8
+
+struct lvm_pool_cpu {
+	struct lvm_state *head;
+	unsigned int count;
+	raw_spinlock_t lock;
+};
+
+static DEFINE_PER_CPU(struct lvm_pool_cpu, lvm_pools);
+
+static void lvm_pool_init_cpu(int cpu)
+{
+	struct lvm_pool_cpu *pool = &per_cpu(lvm_pools, cpu);
+
+	pool->head = NULL;
+	pool->count = 0;
+	raw_spin_lock_init(&pool->lock);
+}
+
+static struct lvm_state *lvm_pool_get(void)
+{
+	struct lvm_pool_cpu *pool;
+	struct lvm_state *lvm = NULL;
+	unsigned long flags;
+	int cpu;
+
+	cpu = get_cpu();
+	pool = &per_cpu(lvm_pools, cpu);
+	raw_spin_lock_irqsave(&pool->lock, flags);
+	if (pool->head) {
+		lvm = pool->head;
+		pool->head = lvm->next;
+		pool->count--;
+	}
+	raw_spin_unlock_irqrestore(&pool->lock, flags);
+	put_cpu();
+
+	if (lvm)
+		lvm->next = NULL;
+
+	return lvm;
+}
+
+static void lvm_pool_put(struct lvm_state *lvm)
+{
+	struct lvm_pool_cpu *pool;
+	unsigned long flags;
+	int cpu;
+
+	if (!lvm)
+		return;
+
+	cpu = get_cpu();
+	pool = &per_cpu(lvm_pools, cpu);
+	raw_spin_lock_irqsave(&pool->lock, flags);
+	if (pool->count < LVM_POOL_MAX) {
+		lvm->next = pool->head;
+		pool->head = lvm;
+		pool->count++;
+		lvm = NULL;
+	}
+	raw_spin_unlock_irqrestore(&pool->lock, flags);
+	put_cpu();
+
+	if (lvm) {
+		lua_state_free(lvm);
+		kfree(lvm);
+	}
+}
+
+static void lvm_vm_reset(struct lvm_state *lvm)
+{
+	struct lua_lsm_module *module;
+	lua_State *L = lvm->L;
+	int idx;
+
+	if (!L)
+		return;
+
+	lua_settop(L, 0);
+	lua_pushnil(L);
+	lua_setfield(L, LUA_REGISTRYINDEX, CURR_ENV);
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "_MODULES");
+	if (lua_istable(L, -1)) {
+		idx = srcu_read_lock(&modules_ss);
+		list_for_each_entry_srcu(module, &lsm_modules, list,
+				srcu_read_lock_held(&modules_ss)) {
+			lua_pushstring(L, module->name);
+			lua_pushnil(L);
+			lua_rawset(L, -3);
+		}
+		srcu_read_unlock(&modules_ss, idx);
+	}
+	lua_pop(L, 1);
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
+	if (lua_istable(L, -1)) {
+		idx = srcu_read_lock(&modules_ss);
+		list_for_each_entry_srcu(module, &lsm_modules, list,
+				srcu_read_lock_held(&modules_ss)) {
+			lua_pushstring(L, module->name);
+			lua_pushnil(L);
+			lua_rawset(L, -3);
+		}
+		srcu_read_unlock(&modules_ss, idx);
+	}
+	lua_pop(L, 1);
+
+	lua_gc(L, LUA_GCCOLLECT, 0);
+}
+
 static lua_State *
 lvm_get_from_task(const struct task_struct *task, bool exclusive)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	struct lvm_state *lvm = &llt->lvm;
+	struct lvm_state *lvm = llt->lvm;
 	int n = refcount_acquire(&lvm->refcount);
 	if (exclusive && n != 1) {
 		refcount_release(&lvm->refcount);
@@ -218,7 +333,7 @@ lvm_get_from_task(const struct task_struct *task, bool exclusive)
 static void lvm_put_to_task(const struct task_struct *task, lua_State *L)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	struct lvm_state *lvm = &llt->lvm;
+	struct lvm_state *lvm = llt->lvm;
 	int n = refcount_release(&lvm->refcount);
 	KASSERT(n == 0, ("<%s> Lua VM is reused, refcount = %d\n",
 		task->comm, n));
@@ -1068,15 +1183,30 @@ int modules_show(struct seq_file *m, void *v)
 int task_blob_init(struct task_struct *task)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	struct lvm_state *lvm = &llt->lvm;
+	struct lvm_state *lvm;
 	int err;
 
 	kvcache_dict_init(&llt->dict);
 
+	lvm = lvm_pool_get();
+	if (!lvm) {
+		lvm = kzalloc(sizeof(*lvm), GFP_KERNEL);
+		if (!lvm)
+			return -ENOMEM;
+		err = lua_state_alloc(lvm);
+		if (err) {
+			kfree(lvm);
+			return err;
+		}
+	}
+
 	refcount_init(&lvm->refcount, 0);
-	err = lua_state_alloc(lvm);
-	if (err)
-		return err;
+#ifdef CONFIG_SECURITY_LUA_LSM_STATS
+	atomic64_set(&lvm->nalloc, 0);
+	atomic64_set(&lvm->nrealloc, 0);
+	atomic64_set(&lvm->nfree, 0);
+#endif
+	llt->lvm = lvm;
 
 	return 0;
 }
@@ -1084,9 +1214,15 @@ int task_blob_init(struct task_struct *task)
 void task_blob_free(struct task_struct *task)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	struct lvm_state *lvm = &llt->lvm;
-	lua_modules_free(task, lvm->L);
-	lua_state_free(lvm);
+	struct lvm_state *lvm = llt->lvm;
+
+	if (lvm) {
+		lua_modules_free(task, lvm->L);
+		lvm_vm_reset(lvm);
+		refcount_init(&lvm->refcount, 0);
+		lvm_pool_put(lvm);
+		llt->lvm = NULL;
+	}
 	kvcache_dict_free(&llt->dict);
 }
 
@@ -1136,6 +1272,9 @@ static int __init lua_lsm_init(void)
 	struct lvm_state *lvm;
 	int cpu;
 	int err;
+
+	for_each_possible_cpu(cpu)
+		lvm_pool_init_cpu(cpu);
 
 	err = task_blob_init(current);
 	if (err)

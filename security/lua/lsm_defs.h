@@ -9,6 +9,7 @@
 #define _SECURITY_LUA_LSM_LSM_DEFS_H
 
 #include "lsm.h"
+#include "lua_object.h"
 
 
 #define LSM_RET_DEFAULT(NAME)	(NAME##_default)
@@ -146,6 +147,8 @@
 			if (lua_isfunction(L, -1)) {					\
 				int top = lua_gettop(L);				\
 				lua_getfenv(L, -1);					\
+				*newtask_nomain(L) = current;				\
+				lua_setfield(L, -2, "current");				\
 				lua_setfield(L, LUA_REGISTRYINDEX, CURR_ENV);		\
 				ASSIGN_FROM_FUNC_ ## vmtype(ret)			\
 					__lua_lsm_vm_ ## NAME(L __VA_OPT__(,)		\

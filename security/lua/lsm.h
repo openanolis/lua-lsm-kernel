@@ -114,6 +114,7 @@ extern struct lsm_blob_sizes lua_lsm_blob_sizes;
 struct lvm_state {
 	lua_State *L;
 	atomic_t refcount;
+	struct lvm_state *next;
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
 	atomic64_t nalloc;
 	atomic64_t nrealloc;
@@ -122,7 +123,7 @@ struct lvm_state {
 };
 
 struct lua_lsm_task {
-    struct lvm_state lvm;
+	struct lvm_state *lvm;
 	struct kvcache_dict dict;
 };
 
