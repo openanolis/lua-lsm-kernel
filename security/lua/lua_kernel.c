@@ -218,7 +218,13 @@ static int kernel_task_is_idle(lua_State *L)
 static int kernel_task_exe_file(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
-	struct file *exe_file = get_task_exe_file(task);
+	struct file *exe_file;
+	if (spin_is_locked(&task->alloc_lock)) {
+		lua_pushnil(L);
+		lua_pushstring(L, "busy");
+		return 2;
+	}
+	exe_file = get_task_exe_file(task);
 	if (exe_file == NULL)
 		return 0;
 	*newgcfile(L) = exe_file;
@@ -236,6 +242,11 @@ static int kernel_task_exepath(lua_State *L)
 			return 0;
 		file = get_mm_exe_file(mm);
 	} else {
+		if (spin_is_locked(&task->alloc_lock)) {
+			lua_pushnil(L);
+			lua_pushstring(L, "busy");
+			return 2;
+		}
 		file = get_task_exe_file(task);
 	}
 	if (file) {
