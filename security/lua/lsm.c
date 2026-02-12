@@ -274,9 +274,12 @@ static void lvm_pool_put(struct lvm_state *lvm)
 
 static void lvm_vm_reset(struct lvm_state *lvm)
 {
-	struct lua_lsm_module *module;
 	lua_State *L = lvm->L;
-	int idx;
+	int modules_idx;
+	int keys_idx;
+	int loaded_idx;
+	int nkeys;
+	int i;
 
 	if (!L)
 		return;
@@ -285,29 +288,40 @@ static void lvm_vm_reset(struct lvm_state *lvm)
 	lua_pushnil(L);
 	lua_setfield(L, LUA_REGISTRYINDEX, CURR_ENV);
 
+	/* Collect keys from _MODULES then clear _MODULES/_LOADED entries. */
 	lua_getfield(L, LUA_REGISTRYINDEX, "_MODULES");
 	if (lua_istable(L, -1)) {
-		idx = srcu_read_lock(&modules_ss);
-		list_for_each_entry_srcu(module, &lsm_modules, list,
-				srcu_read_lock_held(&modules_ss)) {
-			lua_pushstring(L, module->name);
-			lua_pushnil(L);
-			lua_rawset(L, -3);
-		}
-		srcu_read_unlock(&modules_ss, idx);
-	}
-	lua_pop(L, 1);
+		modules_idx = lua_gettop(L);
+		lua_newtable(L);
+		keys_idx = lua_gettop(L);
+		nkeys = 0;
 
-	lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
-	if (lua_istable(L, -1)) {
-		idx = srcu_read_lock(&modules_ss);
-		list_for_each_entry_srcu(module, &lsm_modules, list,
-				srcu_read_lock_held(&modules_ss)) {
-			lua_pushstring(L, module->name);
-			lua_pushnil(L);
-			lua_rawset(L, -3);
+		lua_pushnil(L);
+		while (lua_next(L, modules_idx) != 0) {
+			lua_pushvalue(L, -2);
+			lua_rawseti(L, keys_idx, ++nkeys);
+			lua_pop(L, 1);
 		}
-		srcu_read_unlock(&modules_ss, idx);
+
+		lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
+		loaded_idx = lua_gettop(L);
+		for (i = 1; i <= nkeys; i++) {
+			lua_rawgeti(L, keys_idx, i);
+			if (!lua_isnil(L, -1)) {
+				lua_pushvalue(L, -1);
+				lua_pushnil(L);
+				lua_rawset(L, modules_idx);
+
+				if (lua_istable(L, loaded_idx)) {
+					lua_pushvalue(L, -1);
+					lua_pushnil(L);
+					lua_rawset(L, loaded_idx);
+				}
+			}
+			lua_pop(L, 1);
+		}
+		lua_pop(L, 1);
+		lua_pop(L, 1);
 	}
 	lua_pop(L, 1);
 
