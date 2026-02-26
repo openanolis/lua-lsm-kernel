@@ -15,6 +15,7 @@
 #include <linux/printk.h>
 #include <linux/compiler.h>
 #include <linux/rwlock.h>
+#include <linux/security.h>
 #include <linux/cred.h>
 #include <linux/prctl.h>
 #include <linux/syscalls.h>     /* for __MAP */
@@ -3507,7 +3508,7 @@ LUA_LSM_VOID_DEFINE1(bdev_free_security, struct block_device *, bdev)
 }
 
 /**
- * TODO: bdev_setintegrity
+ * bdev_setintegrity
  * Default: 0
  */
 LUA_LSM_INT_DEFINE4(bdev_setintegrity, struct block_device *, bdev,
@@ -3515,8 +3516,31 @@ LUA_LSM_INT_DEFINE4(bdev_setintegrity, struct block_device *, bdev,
 		const void *, value, size_t, size)
 {
 	*newbdev(L) = bdev;
-	lua_pushnil(L);	/* TODO: type */
-	lua_pushnil(L);	/* TODO: value */
-	lua_pushnil(L);	/* TODO: size */
-}
+	lua_pushinteger(L, (lua_Integer)type);
 
+	if (!value || size == 0) {
+		lua_pushnil(L);
+		lua_pushinteger(L, (lua_Integer)size);
+		return;
+	}
+
+	if (type == LSM_INT_DMVERITY_ROOTHASH) {
+		const struct dm_verity_digest *d = value;
+		lua_createtable(L, 0, 3);
+		if (d->alg) {
+			lua_pushstring(L, d->alg);
+			lua_setfield(L, -2, "alg");
+		}
+		if (d->digest && d->digest_len) {
+			lua_pushlstring(L, d->digest, d->digest_len);
+			lua_setfield(L, -2, "digest");
+		}
+		lua_pushinteger(L, (lua_Integer)d->digest_len);
+		lua_setfield(L, -2, "digest_len");
+		lua_pushinteger(L, (lua_Integer)d->digest_len);
+		return;
+	}
+
+	lua_pushlstring(L, value, size);
+	lua_pushinteger(L, (lua_Integer)size);
+}
