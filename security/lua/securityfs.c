@@ -171,7 +171,7 @@ static struct lua_lsm_file {
 	{ NULL, 0, NULL }
 };
 
-static int __init lua_lsm_securityfs_init(void)
+int __init lua_lsm_securityfs_init(void)
 {
 	struct dentry *dir;
 	struct dentry *dentry;
@@ -202,4 +202,3 @@ static int __init lua_lsm_securityfs_init(void)
 
 	return 0;
 }
-fs_initcall(lua_lsm_securityfs_init);

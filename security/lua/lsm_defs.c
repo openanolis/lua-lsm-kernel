@@ -548,7 +548,7 @@ LUA_LSM_INT_DEFINE5(dentry_init_security, struct dentry *, dentry,
  * Default: 0
  */
 LUA_LSM_INT_DEFINE5(dentry_create_files_as, struct dentry *, dentry,
-		int, mode, struct qstr *, name,
+		int, mode, const struct qstr *, name,
 		const struct cred *, old, struct cred *, new)
 {
 	*newdentry(L) = dentry;
@@ -1590,8 +1590,7 @@ LUA_LSM_INT_DEFINE1(file_truncate, struct file *, file)
 /**
  * task_alloc - prepare
  */
-LUA_LSM_PREPARE_DEFINE2(task_alloc, struct task_struct *, task,
-		unsigned long, clone_flags)
+LUA_LSM_PREPARE_DEFINE2(task_alloc, struct task_struct *, task, u64, clone_flags)
 {
 	return task_blob_init(task);
 }
@@ -1600,8 +1599,7 @@ LUA_LSM_PREPARE_DEFINE2(task_alloc, struct task_struct *, task,
  * task_alloc
  * Default: 0
  */
-LUA_LSM_INT_DEFINE2(task_alloc, struct task_struct *, task,
-		unsigned long, clone_flags)
+LUA_LSM_INT_DEFINE2(task_alloc, struct task_struct *, task, u64, clone_flags)
 {
 	*newtask(L) = task;
 	lua_pushnumber(L, (lua_Number)clone_flags);

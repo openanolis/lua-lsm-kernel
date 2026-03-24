@@ -460,9 +460,8 @@ static int fs_fscontext_parse_fs_string(lua_State *L)
 {
 	struct fs_context *fc = tofscontext(L, 1);
 	const char *key = luaL_checkstring(L, 2);
-	size_t size;
-	const char *value = luaL_checklstring(L, 3, &size);
-	int rc = vfs_parse_fs_string(fc, key, value, size);
+	const char *value = luaL_checkstring(L, 3);
+	int rc = vfs_parse_fs_string(fc, key, value);
 	lua_pushboolean(L, rc == 0);
 	return 1;
 }

@@ -1316,8 +1316,9 @@ static int __init lua_lsm_init(void)
 }
 
 DEFINE_LSM(lua) = {
-	.name = "lua",
+	.id = &lua_lsmid,
 	.enabled = &lua_lsm_enabled,
 	.blobs = &lua_lsm_blob_sizes,
 	.init = lua_lsm_init,
+	.initcall_fs = lua_lsm_securityfs_init,
 };
