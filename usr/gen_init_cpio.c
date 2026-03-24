@@ -367,7 +367,6 @@ static int cpio_mkfile(const char *name, const char *location,
 	int namesize, namepadlen;
 	unsigned int i;
 	uint32_t csum = 0;
-	ssize_t this_read;
 
 	mode |= S_IFREG;
 
@@ -456,19 +455,9 @@ static int cpio_mkfile(const char *name, const char *location,
 		    push_pad(namepadlen ? namepadlen : padlen(offset, 4)) < 0)
 			goto error;
 
-		if (size) {
-			this_read = copy_file_range(file, NULL, outfd, NULL, size, 0);
-			if (this_read > 0) {
-				if (this_read > size)
-					goto error;
-				offset += this_read;
-				size -= this_read;
-			}
-			/* short or failed copy falls back to read/write... */
-		}
-
 		while (size) {
 			unsigned char filebuf[65536];
+			ssize_t this_read;
 			size_t this_size = MIN(size, sizeof(filebuf));
 
 			this_read = read(file, filebuf, this_size);
