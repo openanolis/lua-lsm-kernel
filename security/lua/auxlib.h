@@ -11,6 +11,10 @@
 #include <linux/lua.h>
 #include <linux/lauxlib.h>
 
+struct cred;
+struct dentry;
+struct file;
+
 static inline gfp_t lua_lsm_gfp(void)
 {
 	/*
