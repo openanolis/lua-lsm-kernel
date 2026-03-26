@@ -438,7 +438,8 @@ int aux_file_path(lua_State *L, struct file *filp)
 		lua_pushstring(L, path);
 		nres = 1;
 	}
-	kfree(buf);
+	if (buf)
+		kfree(buf);
 	return nres;
 }
 
@@ -473,7 +474,8 @@ int aux_dentry_path(lua_State *L, struct dentry *dentry, int rawpath)
 		lua_pushstring(L, path);
 		nres = 1;
 	}
-	kfree(buf);
+	if (buf)
+		kfree(buf);
 	return nres;
 }
 
