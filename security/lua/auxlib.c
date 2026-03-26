@@ -21,20 +21,20 @@
 #include "auxlib.h"
 #include "lua_object.h"
 
-
 void lua_table_dump(lua_State *L, int idx, int level, int max)
 {
 	int i = 1;
+
 	if (idx < 0)
 		idx = lua_gettop(L) + 1 + idx;
 	if (!lua_istable(L, idx)) {
 		pr_err("%*s    <Not a table, type = %s>\n",
-			level * 4, "", luaL_typename(L, -1));
+		       level * 4, "", luaL_typename(L, -1));
 		return;
 	}
 	if (level > 10) {
 		pr_err("%*s    <Table nesting is out of scope, level = %d>\n",
-			level * 4, "", level);
+		       level * 4, "", level);
 		return;
 	}
 	/* table is in the stack at index 't' */
@@ -95,7 +95,7 @@ void lua_stack_dump(lua_State *L)
 int lua_traceback(lua_State *L)
 {
 	pr_err("@_@ LuaVM traceback: %s [%d] Lua stacktop = %d\n",
-		current->comm, task_pid_nr(current), lua_gettop(L));
+	       current->comm, task_pid_nr(current), lua_gettop(L));
 	if (!lua_isstring(L, 1))  /* 'message' not a string? */
 		return 1;  /* keep it intact */
 	pr_err("@_@ LuaVM: %s\n", lua_tostring(L, -1));
@@ -124,7 +124,7 @@ int lua_traceback(lua_State *L)
 }
 
 int luaL_loadbuffer_wrap(lua_State *L, const char *buff,
-		size_t sz, const char *name)
+			 size_t sz, const char *name)
 {
 	int status;
 
@@ -132,12 +132,19 @@ int luaL_loadbuffer_wrap(lua_State *L, const char *buff,
 	if (status != 0) {
 		const char * __maybe_unused error = lua_tostring(L, -1);
 		int err;
+
 		__log_err("load: status = %d, top = %d, %s\n",
-			status, lua_gettop(L), error);
+			  status, lua_gettop(L), error);
 		switch (status) {
-		case LUA_ERRMEM:	err = -ENOMEM;	break;
-		case LUA_ERRSYNTAX:	err = -EDOM;	break;
-		default:		err = -EINVAL;	break;
+		case LUA_ERRMEM:
+			err = -ENOMEM;
+			break;
+		case LUA_ERRSYNTAX:
+			err = -EDOM;
+			break;
+		default:
+			err = -EINVAL;
+			break;
 		}
 		lua_pop(L, 1);
 		return err;
@@ -153,15 +160,24 @@ int lua_pcall_wrap(lua_State *L, int nargs, int nresults, int errfunc)
 	if (status != 0) {
 		int err;
 		const char *error = lua_tostring(L, -1);
+
 		if (!error)
 			error = "unknown error";
 		__log_err("pcall: status = %d, top = %d [%s]\n\t%s\n",
-			status, lua_gettop(L), luaL_typename(L, -1), error);
+			  status, lua_gettop(L), luaL_typename(L, -1), error);
 		switch (status) {
-		case LUA_ERRMEM:	err = -ENOMEM;	break;
-		case LUA_ERRRUN:	err = -ENOEXEC;	break;
-		case LUA_ERRERR:	err = -EFAULT;	break;
-		default:		err = -EINVAL;	break;
+		case LUA_ERRMEM:
+			err = -ENOMEM;
+			break;
+		case LUA_ERRRUN:
+			err = -ENOEXEC;
+			break;
+		case LUA_ERRERR:
+			err = -EFAULT;
+			break;
+		default:
+			err = -EINVAL;
+			break;
 		}
 		lua_pop(L, 1);
 		return err;
@@ -176,7 +192,7 @@ int lua_pcall_wrap(lua_State *L, int nargs, int nresults, int errfunc)
  ** Leaves resulting module on the top.
  */
 void luaL_requiref(lua_State *L, const char *modname,
-		lua_CFunction openf, int glb)
+		   lua_CFunction openf, int glb)
 {
 	luaL_findtable(L, LUA_REGISTRYINDEX, "_LOADED", 1);
 	lua_getfield(L, -1, modname);  /* _LOADED[modname] */
@@ -196,7 +212,7 @@ void luaL_requiref(lua_State *L, const char *modname,
 }
 
 unsigned int tocflags(lua_State *L, int idx, int top,
-		const struct cflag_opt *opts, unsigned int d)
+		      const struct cflag_opt *opts, unsigned int d)
 {
 	unsigned int flags = 0;
 	const char *s;
@@ -241,7 +257,6 @@ unsigned int tocflags(lua_State *L, int idx, int top,
 		case LUA_TBOOLEAN:
 			if (lua_toboolean(L, idx))
 				break;
-			/* else fall through */
 			fallthrough;
 		case LUA_TNONE:
 		case LUA_TNIL:
@@ -257,6 +272,7 @@ const char *
 fromcflags(const struct cflag_opt *opts, unsigned int flag, const char *d)
 {
 	int i;
+
 	for (i = 0; opts[i].name; i++) {
 		if (opts[i].flag == flag)
 			return opts[i].name;
@@ -265,10 +281,11 @@ fromcflags(const struct cflag_opt *opts, unsigned int flag, const char *d)
 }
 
 void table_fromopts(lua_State *L, const struct cflag_opt *opts,
-		unsigned int bitfield, unsigned int mask)
+		    unsigned int bitfield, unsigned int mask)
 {
 	int i;
 	int hw;
+
 	if (!bitfield) {
 		for (i = 0; opts[i].name; i++)
 			bitfield |= opts[i].flag;
@@ -316,7 +333,8 @@ void createmeta(lua_State *L, const char *tname, const char *name,
 void *checkudata(lua_State *L, int ud, const char *name)
 {
 	void *p = lua_touserdata(L, ud);
-	if (p != NULL) {  /* value is a userdata? */
+
+	if (p) {  /* value is a userdata? */
 		if (lua_getmetatable(L, ud)) {  /* does it have a metatable? */
 			lua_getfield(L, LUA_REGISTRYINDEX, name);  /* get correct metatable */
 			if (lua_rawequal(L, -1, -2)) {  /* does it have the correct mt? */
@@ -333,9 +351,9 @@ void *checkudata(lua_State *L, int ud, const char *name)
  * [ [ gc ] ------> regular ] ------> raw
  */
 void createmeta3(lua_State *L, const char *name, const luaL_Reg *base,
-		const char *tname_gc, const luaL_Reg *funcs_gc,
-		const char *tname, const luaL_Reg *funcs,
-		const char *tname_raw, const luaL_Reg *funcs_raw)
+		 const char *tname_gc, const luaL_Reg *funcs_gc,
+		 const char *tname, const luaL_Reg *funcs,
+		 const char *tname_raw, const luaL_Reg *funcs_raw)
 {
 	if (funcs_gc && funcs)
 		createmeta(L, tname_gc, name, funcs_gc, base, 0);
@@ -355,7 +373,8 @@ void *checkudata3(lua_State *L, int ud, const char *tname)
 {
 	int idx, n;
 	void *p = lua_touserdata(L, ud);
-	if (p == NULL)
+
+	if (!p)
 		return NULL;
 
 	luaL_getmetatable(L, tname);
@@ -395,7 +414,7 @@ int aux_file_path(lua_State *L, struct file *filp)
 		return 2;
 	}
 
-	if (unlikely(filp->f_path.dentry == NULL)) {
+	if (unlikely(!filp->f_path.dentry)) {
 		lua_pushnil(L);
 		lua_pushstring(L, errname(-ENOENT));
 		return 2;
@@ -404,7 +423,7 @@ int aux_file_path(lua_State *L, struct file *filp)
 	path = file_path(filp, buffer, sizeof(buffer));
 	if (PTR_ERR(path) == -ENAMETOOLONG) {
 		buf = kmalloc(PATH_MAX, lua_lsm_gfp());
-		if (buf == NULL) {
+		if (!buf) {
 			lua_pushnil(L);
 			lua_pushstring(L, errname(-ENOMEM));
 			return 2;
@@ -419,8 +438,7 @@ int aux_file_path(lua_State *L, struct file *filp)
 		lua_pushstring(L, path);
 		nres = 1;
 	}
-	if (buf)
-		kfree(buf);
+	kfree(buf);
 	return nres;
 }
 
@@ -437,7 +455,7 @@ int aux_dentry_path(lua_State *L, struct dentry *dentry, int rawpath)
 		path = dentry_path(dentry, buffer, sizeof(buffer));
 	if (PTR_ERR(path) == -ENAMETOOLONG) {
 		buf = kmalloc(PATH_MAX, lua_lsm_gfp());
-		if (buf == NULL) {
+		if (!buf) {
 			lua_pushnil(L);
 			lua_pushstring(L, errname(-ENOMEM));
 			return 2;
@@ -455,8 +473,7 @@ int aux_dentry_path(lua_State *L, struct dentry *dentry, int rawpath)
 		lua_pushstring(L, path);
 		nres = 1;
 	}
-	if (buf)
-		kfree(buf);
+	kfree(buf);
 	return nres;
 }
 
@@ -508,6 +525,7 @@ int arg2cap(lua_State *L, int idx)
 	};
 	int tt = lua_type(L, idx);
 	int cap;
+
 	switch (tt) {
 	case LUA_TNUMBER:
 		cap = luaL_checkinteger(L, idx);
@@ -549,6 +567,7 @@ int aux_capable(lua_State *L, const struct cred *cred, int idx)
 		err = cap_capable(cred, current_user_ns(), cap, opt);
 	} else {
 		struct task_struct *task = totask(L, idx);
+
 		cap = arg2cap(L, idx + 1);
 		if (top >= idx + 2)
 			opt = tocflags(L, idx + 2, top, opts, CAP_OPT_NONE);

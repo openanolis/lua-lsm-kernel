@@ -10,7 +10,6 @@
 #include <linux/kstrtox.h>
 #include "lsm.h"
 
-
 static bool lua_lsm_capable(int cap)
 {
 	bool allow = true;
@@ -50,7 +49,7 @@ static const struct file_operations fops_version = {
 };
 
 static ssize_t module_write(const char __user *buf, size_t len,
-			loff_t *ppos, int load)
+			    loff_t *ppos, int load)
 {
 	char *buffer, *p;
 	int err;
@@ -88,7 +87,7 @@ static ssize_t module_write(const char __user *buf, size_t len,
 }
 
 static ssize_t register_write(struct file *file, const char __user *buf,
-			size_t len, loff_t *ppos)
+			      size_t len, loff_t *ppos)
 {
 	return module_write(buf, len, ppos, 1);
 }
@@ -98,7 +97,7 @@ static const struct file_operations fops_register = {
 };
 
 static ssize_t unregister_write(struct file *file, const char __user *buf,
-		size_t len, loff_t *ppos)
+				size_t len, loff_t *ppos)
 {
 	return module_write(buf, len, ppos, 0);
 }

@@ -19,8 +19,8 @@ static inline gfp_t lua_lsm_gfp(void)
 	 */
 	if (in_atomic() || rcu_preempt_depth() > 0)
 		return GFP_ATOMIC;
-	else
-		return GFP_NOFS;
+
+	return GFP_NOFS;
 }
 
 #define luaL_newlibtable(L, l)						\
@@ -38,11 +38,11 @@ void lua_stack_dump(lua_State *L);
 
 int lua_traceback(lua_State *L);
 int luaL_loadbuffer_wrap(lua_State *L, const char *buff,
-		size_t sz, const char *name);
+			 size_t sz, const char *name);
 int lua_pcall_wrap(lua_State *L, int nargs, int nresults, int errfunc);
 
 void luaL_requiref(lua_State *L, const char *modname,
-		lua_CFunction openf, int glb);
+		   lua_CFunction openf, int glb);
 
 struct cflag_opt {
 	const char *name;
@@ -50,13 +50,13 @@ struct cflag_opt {
 };
 
 unsigned int tocflags(lua_State *L, int idx, int top,
-		const struct cflag_opt *opts, unsigned int d);
+		      const struct cflag_opt *opts, unsigned int d);
 
 const char *
 fromcflags(const struct cflag_opt *opts, unsigned int flag, const char *d);
 
 void table_fromopts(lua_State *L, const struct cflag_opt *opts,
-		unsigned int bitfield, unsigned int mask);
+		    unsigned int bitfield, unsigned int mask);
 
 void **newcptr(lua_State *L, const char *metatable);
 void createmeta(lua_State *L, const char *tname, const char *name,
@@ -64,11 +64,10 @@ void createmeta(lua_State *L, const char *tname, const char *name,
 void *checkudata(lua_State *L, int ud, const char *name);
 
 void createmeta3(lua_State *L, const char *name, const luaL_Reg *base,
-		const char *tname_gc, const luaL_Reg *funcs_gc,
-		const char *tname, const luaL_Reg *funcs,
-		const char *tname_raw, const luaL_Reg *funcs_raw);
+		 const char *tname_gc, const luaL_Reg *funcs_gc,
+		 const char *tname, const luaL_Reg *funcs,
+		 const char *tname_raw, const luaL_Reg *funcs_raw);
 void *checkudata3(lua_State *L, int ud, const char *tname);
-
 
 struct const_value {
 	const char *name;

@@ -18,7 +18,6 @@
 		}							\
 	} while (0)
 
-
 static inline void
 refcount_init(atomic_t *count, long value)
 {
@@ -36,6 +35,7 @@ static inline int
 refcount_release(atomic_t *count)
 {
 	int n = atomic_dec_return(count);
+
 	KASSERT(n >= 0, ("negative refcount %p", count));
 	return n;
 }

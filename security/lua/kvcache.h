@@ -40,6 +40,7 @@ struct kvcache_dict {
 	int capacity;
 	atomic_t count;
 	rwlock_t lock;
+
 	RB_HEAD(kvcache, kvcache_node) root;
 };
 

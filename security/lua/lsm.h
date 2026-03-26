@@ -25,7 +25,6 @@ extern int lua_lsm_initialized __initdata;
 
 #define LUA_LSM_VERSION		1
 
-
 struct lua_lsm_hook_stat {
 	const char *name;
 	atomic_t nhooks;
@@ -38,14 +37,12 @@ struct lua_lsm_hook_stat {
 
 extern struct lua_lsm_hook_stat lua_lsm_hook_stats[];
 
-
 #define LSM_HOOK(RET, DEFAULT, NAME, ...)				\
 	int __prepare_ ## NAME(__VA_ARGS__);				\
 	void __postpone_ ## NAME(__VA_ARGS__);
 
 #include <linux/lsm_hook_defs.h>
 #undef LSM_HOOK
-
 
 enum {
 	#define LSM_HOOK(RET, DEFAULT, NAME, ...)	__LL_NR_ ## NAME,
@@ -75,22 +72,26 @@ struct lua_lsm_module {
 	int version;
 	enum lua_lsm_module_state state;
 	struct list_head list;
+
 	__BITMAP_TYPE(, uint32_t, __LL_NR_MAX) hookfuncs;
 	int nhooks;
 	char *chunk;
 	size_t chunk_len;
 	atomic_t nloaded;
 	struct list_head shdicts;
+
+	/* Protects shdicts and shdict_count. */
 	spinlock_t shdict_lock;
 	atomic_t shdict_count;
 	struct list_head kvnodes;
+
+	/* Protects kvnodes and kvnodes_count. */
 	spinlock_t kvnodes_lock;
 	atomic_t kvnodes_count;
 };
 
 extern struct list_head lsm_modules;
 extern struct srcu_struct modules_ss;
-
 
 #define TABLINE							\
 	"---------------------------------------------"		\

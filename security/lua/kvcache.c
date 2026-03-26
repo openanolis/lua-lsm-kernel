@@ -17,7 +17,6 @@
 #include "lsm.h"
 #include "kvcache.h"
 
-
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
 
 static atomic64_t node_nalloc = ATOMIC_INIT(0);
@@ -53,12 +52,13 @@ static inline void kvcache_stats_free(void) {}
 static int kvcache_node_cmp(struct kvcache_node *n1, struct kvcache_node *n2)
 {
 	int n = strcmp(n1->key, n2->key);
+
 	if (n != 0)
 		return n;
 	return (char *)n1->module - (char *)n2->module;
 }
-RB_GENERATE_STATIC(kvcache, kvcache_node, node, kvcache_node_cmp);
 
+RB_GENERATE_STATIC(kvcache, kvcache_node, node, kvcache_node_cmp);
 
 static int kvcache_result(lua_State *L, int err)
 {
@@ -69,14 +69,14 @@ static int kvcache_result(lua_State *L, int err)
 
 static struct kvcache_node *
 kvcache_node_alloc(struct kvcache_dict *dict, struct lua_lsm_module *module,
-		const char *key, size_t len)
+		   const char *key, size_t len)
 {
 	size_t l = sizeof(struct kvcache_node);
 	struct kvcache_node *node;
 
 	l += key ? (len + 1) : 0;
 	node = kmalloc(l, lua_lsm_gfp());
-	if (node == NULL)
+	if (!node)
 		return NULL;
 
 	if (key) {
@@ -121,7 +121,7 @@ static void kvcache_node_hold(struct kvcache_node *node)
 
 static void kvcache_node_drop(struct kvcache_node *node)
 {
-	if (node == NULL)
+	if (!node)
 		return;
 	if (refcount_release(&node->refcount) == 0)
 		kvcache_node_free(node);
@@ -129,10 +129,11 @@ static void kvcache_node_drop(struct kvcache_node *node)
 
 static struct kvcache_node *
 kvcache_lookup(struct kvcache_dict *dict,
-	struct lua_lsm_module *module, const char *key)
+	       struct lua_lsm_module *module, const char *key)
 {
 	struct kvcache_node tmp, *node;
 	unsigned long flags;
+
 	tmp.key = key;
 	tmp.module = module;
 	read_lock_irqsave(&dict->lock, flags);
@@ -144,7 +145,7 @@ kvcache_lookup(struct kvcache_dict *dict,
 
 static struct kvcache_node *
 kvcache_module_link(struct kvcache_dict *dict,
-		struct lua_lsm_module *module, struct kvcache_node *node)
+		    struct lua_lsm_module *module, struct kvcache_node *node)
 {
 	struct kvcache_node *prev;
 	unsigned long flags;
@@ -177,7 +178,8 @@ unlock:
 
 static void
 kvcache_module_unlink_unlocked(struct kvcache_dict *dict,
-		struct lua_lsm_module *module, struct kvcache_node *node)
+			       struct lua_lsm_module *module,
+			       struct kvcache_node *node)
 {
 	RB_REMOVE(kvcache, &dict->root, node);
 	atomic_dec(&dict->count);
@@ -191,9 +193,11 @@ kvcache_module_unlink_unlocked(struct kvcache_dict *dict,
 
 static void
 kvcache_module_unlink(struct kvcache_dict *dict,
-		struct lua_lsm_module *module, struct kvcache_node *node)
+		      struct lua_lsm_module *module,
+		      struct kvcache_node *node)
 {
 	unsigned long flags;
+
 	write_lock_irqsave(&dict->lock, flags);
 	kvcache_module_unlink_unlocked(dict, module, node);
 	write_unlock_irqrestore(&dict->lock, flags);
@@ -257,7 +261,7 @@ static int kvcache_node_refill(lua_State *L, int idx, struct kvcache_node *node)
 }
 
 static int kvcache_set(lua_State *L, struct kvcache_dict *dict,
-		struct lua_lsm_module *module)
+		       struct lua_lsm_module *module)
 {
 	size_t len;
 	const char *key = luaL_checklstring(L, 2, &len);
@@ -266,12 +270,12 @@ static int kvcache_set(lua_State *L, struct kvcache_dict *dict,
 	int err;
 
 	node = kvcache_lookup(dict, module, key);
-	if (node == NULL) {
+	if (!node) {
 		if (tt == LUA_TNIL)
 			goto ret;
 
 		node = kvcache_node_alloc(dict, module, key, len);
-		if (node == NULL)
+		if (!node)
 			return kvcache_result(L, -ENOMEM);
 
 		err = kvcache_node_fill(L, 3, node);
@@ -336,7 +340,7 @@ static int kvcache_node_get(lua_State *L, struct kvcache_node *node)
 }
 
 static int kvcache_get(lua_State *L, struct kvcache_dict *dict,
-		struct lua_lsm_module *module)
+		       struct lua_lsm_module *module)
 {
 	const char *key = luaL_checkstring(L, 2);
 	struct kvcache_node *node;
@@ -352,7 +356,7 @@ static int kvcache_get(lua_State *L, struct kvcache_dict *dict,
 }
 
 static int kvcache_incr(lua_State *L, struct kvcache_dict *dict,
-		struct lua_lsm_module *module)
+			struct lua_lsm_module *module)
 {
 	size_t len;
 	const char *key = luaL_checklstring(L, 2, &len);
@@ -362,9 +366,9 @@ static int kvcache_incr(lua_State *L, struct kvcache_dict *dict,
 	int err;
 
 	node = kvcache_lookup(dict, module, key);
-	if (node == NULL) {
+	if (!node) {
 		node = kvcache_node_alloc(dict, module, key, len);
-		if (node == NULL)
+		if (!node)
 			return kvcache_result(L, -ENOMEM);
 
 		node->n = n;
@@ -417,6 +421,7 @@ int kvcache_module_nodes_gc(struct lua_lsm_module *module)
 	spin_lock_bh(&nodes_gc_lock);
 	list_for_each_entry(node, &module->kvnodes, modlist) {
 		struct kvcache_dict *dict = node->dict;
+
 		BUG_ON(!dict);
 		/*
 		 * module is set to NULL, so there is no need to remove
@@ -435,7 +440,7 @@ int kvcache_module_nodes_gc(struct lua_lsm_module *module)
 	}
 
 	__log_info("module <%s>, kvnodes_count = %d, freed = %d\n",
-			module->name, count, n);
+		   module->name, count, n);
 	WARN_ON(count != n);
 	return n;
 }
@@ -485,14 +490,15 @@ static struct lua_lsm_module *module_from_object_fenv(lua_State *L, int idx)
 	lua_gettable(L, -2);
 	if (!lua_islightuserdata(L, -1)) {
 		const char * __maybe_unused key = luaL_checkstring(L, 2);
+
 		if (luaL_callmeta(L, 1, "__tostring")) {
 			__log_err("NO object.fenv: <%s> key = %s, top = %d [%s]\n",
-				lua_tostring(L, -1), key, lua_gettop(L),
-				luaL_typename(L, -1));
+				  lua_tostring(L, -1), key, lua_gettop(L),
+				  luaL_typename(L, -1));
 			lua_pop(L, 3);
 		} else {
 			__log_err("NO object.fenv: key = %s, top = %d\n",
-				key, lua_gettop(L));
+				  key, lua_gettop(L));
 			lua_pop(L, 2);
 		}
 		return NULL;
@@ -508,7 +514,7 @@ int lua_object_get(lua_State *L, struct kvcache_dict *dict)
 	struct lua_lsm_module *module;
 
 	module = module_from_object_fenv(L, 1);
-	if (module == NULL)
+	if (!module)
 		return 0;
 	return kvcache_get(L, dict, module);
 }
@@ -518,7 +524,7 @@ int lua_object_incr(lua_State *L, struct kvcache_dict *dict)
 	struct lua_lsm_module *module;
 
 	module = module_from_object_fenv(L, 1);
-	if (module == NULL)
+	if (!module)
 		return kvcache_result(L, -ESRCH);
 
 	return kvcache_incr(L, dict, module);
@@ -570,7 +576,7 @@ int lua_object_newindex(lua_State *L, struct kvcache_dict *dict)
 	struct lua_lsm_module *module;
 
 	module = module_from_object_fenv(L, 1);
-	if (module == NULL)
+	if (!module)
 		return kvcache_result(L, -ESRCH);
 
 	return kvcache_set(L, dict, module);
@@ -581,18 +587,21 @@ int lua_object_newindex(lua_State *L, struct kvcache_dict *dict)
 static int shdict_set(lua_State *L)
 {
 	struct kvcache_dict *shdict = toshdict(L, 1);
+
 	return kvcache_set(L, shdict, NULL);
 }
 
 static int shdict_get(lua_State *L)
 {
 	struct kvcache_dict *shdict = toshdict(L, 1);
+
 	return kvcache_get(L, shdict, NULL);
 }
 
 static int shdict_incr(lua_State *L)
 {
 	struct kvcache_dict *shdict = toshdict(L, 1);
+
 	return kvcache_incr(L, shdict, NULL);
 }
 
@@ -617,6 +626,7 @@ static int shdict_tostring(lua_State *L)
 {
 	struct kvcache_dict *shdict = toshdict(L, 1);
 	unsigned long flags;
+
 	read_lock_irqsave(&shdict->lock, flags);
 	lua_pushfstring(L, "shdict (%d / %d)",
 			atomic_read(&shdict->count), shdict->capacity);

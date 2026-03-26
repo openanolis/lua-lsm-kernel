@@ -62,32 +62,38 @@ static int capability_add(lua_State *L)
 {
 	kernel_cap_t cap1 = tocap(L, 1);
 	int tt = lua_type(L, 2);
+	int cap;
+
 	if (tt == LUA_TUSERDATA) {
 		const kernel_cap_t cap2 = tocap(L, 2);
+
 		*newcap(L) = cap_combine(cap1, cap2);
 		return 1;
-	} else {
-		int cap = arg2cap(L, 2);
-		cap_raise(cap1, cap);
-		*newcap(L) = cap1;
-		return 1;
 	}
+
+	cap = arg2cap(L, 2);
+	cap_raise(cap1, cap);
+	*newcap(L) = cap1;
+	return 1;
 }
 
 static int capability_sub(lua_State *L)
 {
 	kernel_cap_t cap1 = tocap(L, 1);
 	int tt = lua_type(L, 2);
+	int cap;
+
 	if (tt == LUA_TUSERDATA) {
 		const kernel_cap_t cap2 = tocap(L, 2);
+
 		*newcap(L) = cap_drop(cap1, cap2);
 		return 1;
-	} else {
-		int cap = arg2cap(L, 2);
-		cap_lower(cap1, cap);
-		*newcap(L) = cap1;
-		return 1;
 	}
+
+	cap = arg2cap(L, 2);
+	cap_lower(cap1, cap);
+	*newcap(L) = cap1;
+	return 1;
 }
 
 static int capability_mul(lua_State *L)
@@ -102,6 +108,7 @@ static int capability_eq(lua_State *L)
 {
 	const kernel_cap_t cap1 = tocap(L, 1);
 	const kernel_cap_t cap2 = tocap(L, 2);
+
 	lua_pushboolean(L, cap_isidentical(cap1, cap2));
 	return 1;
 }
@@ -110,6 +117,7 @@ static int capability_le(lua_State *L)
 {
 	const kernel_cap_t cap1 = tocap(L, 1);
 	const kernel_cap_t cap2 = tocap(L, 2);
+
 	lua_pushboolean(L, cap_issubset(cap1, cap2));
 	return 1;
 }
@@ -119,6 +127,7 @@ static int capability_lt(lua_State *L)
 	const kernel_cap_t cap1 = tocap(L, 1);
 	const kernel_cap_t cap2 = tocap(L, 2);
 	bool b = cap_issubset(cap1, cap2) && !cap_isidentical(cap1, cap2);
+
 	lua_pushboolean(L, b);
 	return 1;
 }

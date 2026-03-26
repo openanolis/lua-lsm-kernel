@@ -52,6 +52,7 @@ static const struct const_value errnos[] = {
 static int errno_errname(lua_State *L)
 {
 	int err = luaL_checkinteger(L, 1);
+
 	lua_pushstring(L, errname(err));
 	return 1;
 }

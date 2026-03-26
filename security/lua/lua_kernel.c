@@ -20,12 +20,12 @@
 #include "kvcache.h"
 #include "lua_object.h"
 
-
 /**********************************  cred **********************************/
 
 static int kernel_cred_uids(lua_State *L)
 {
 	const struct cred *cred = tocred(L, 1);
+
 	lua_pushinteger(L, cred->uid.val);
 	lua_pushinteger(L, cred->euid.val);
 	lua_pushinteger(L, cred->suid.val);
@@ -36,6 +36,7 @@ static int kernel_cred_uids(lua_State *L)
 static int kernel_cred_gids(lua_State *L)
 {
 	const struct cred *cred = tocred(L, 1);
+
 	lua_pushinteger(L, cred->gid.val);
 	lua_pushinteger(L, cred->egid.val);
 	lua_pushinteger(L, cred->sgid.val);
@@ -47,6 +48,7 @@ static int kernel_cred_cap_eip(lua_State *L)
 {
 	struct cred *cred = tocred(L, 1);
 	int top = lua_gettop(L);
+
 	if (top > 4)
 		return luaL_error(L, "wrong number of arguments");
 	if (top == 1) {
@@ -70,27 +72,29 @@ static int kernel_cred_cap_eip(lua_State *L)
 static int kernel_cred_cap_bset(lua_State *L)
 {
 	struct cred *cred = tocred(L, 1);
+
 	if (lua_gettop(L) == 1) {
 		*newcap(L) = cred->cap_bset;
 		return 1;
-	} else {
-		cred->cap_bset = tocap(L, 2);
-		lua_settop(L, 1);
-		return 1;
 	}
+
+	cred->cap_bset = tocap(L, 2);
+	lua_settop(L, 1);
+	return 1;
 }
 
 static int kernel_cred_cap_ambient(lua_State *L)
 {
 	struct cred *cred = tocred(L, 1);
+
 	if (lua_gettop(L) == 1) {
 		*newcap(L) = cred->cap_ambient;
 		return 1;
-	} else {
-		cred->cap_ambient = tocap(L, 2);
-		lua_settop(L, 1);
-		return 1;
 	}
+
+	cred->cap_ambient = tocap(L, 2);
+	lua_settop(L, 1);
+	return 1;
 }
 
 /*
@@ -111,14 +115,17 @@ static int kernel_cred_securebits(lua_State *L)
 	};
 	struct cred *cred = tocred(L, 1);
 	int top = lua_gettop(L);
+
 	if (top >= 2) {
 		int start = (top == 2) ? 2 : 3;
 		int and = lua_isboolean(L, 2) && lua_toboolean(L, 2);
 		unsigned int flags = tocflags(L, start, top, opts, 0);
 		unsigned int res = cred->securebits & flags;
+
 		lua_pushboolean(L, and ? res == flags : (int)res);
 		return 1;
-	} else if (top == 1) {
+	}
+	if (top == 1) {
 		table_fromopts(L, opts, 0, (unsigned int)cred->securebits);
 		return 1;
 	}
@@ -137,10 +144,10 @@ static const luaL_Reg cred_meth[] = {
 
 /**********************************  task **********************************/
 
-
 static int kernel_task_pids(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
+
 	lua_pushinteger(L, task->pid);
 	lua_pushinteger(L, task->tgid);
 	return 2;
@@ -156,6 +163,7 @@ static int kernel_task_cred(lua_State *L)
 static int kernel_task_comm(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
+
 	lua_pushstring(L, task->comm);
 	return 1;
 }
@@ -163,6 +171,7 @@ static int kernel_task_comm(lua_State *L)
 static int kernel_task_nr_threads(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
+
 	lua_pushinteger(L, get_nr_threads(task));
 	return 1;
 }
@@ -170,17 +179,19 @@ static int kernel_task_nr_threads(lua_State *L)
 static int kernel_task_group_leader(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
-	if (!thread_group_leader(task)) {
+
+	if (!thread_group_leader(task))
 		*newtask(L) = rcu_dereference(task->group_leader);
-	} else {
+	else
 		lua_settop(L, 1);
-	}
+
 	return 1;
 }
 
 static int kernel_task_thread_group_leader(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
+
 	lua_pushboolean(L, thread_group_leader(task));
 	return 1;
 }
@@ -189,6 +200,7 @@ static int kernel_task_same_thread_group(lua_State *L)
 {
 	struct task_struct *task1 = totask(L, 1);
 	struct task_struct *task2 = totask(L, 2);
+
 	lua_pushboolean(L, same_thread_group(task1, task2));
 	return 1;
 }
@@ -199,6 +211,7 @@ static int kernel_task_same_group_ptracer(lua_State *L)
 	struct task_struct *tracer = totask(L, 2);
 	struct task_struct *parent;
 	int res = 0;
+
 	rcu_read_lock();
 	parent = ptrace_parent(tracee);
 	if (parent && same_thread_group(parent, tracer))
@@ -211,6 +224,7 @@ static int kernel_task_same_group_ptracer(lua_State *L)
 static int kernel_task_is_idle(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
+
 	lua_pushboolean(L, is_idle_task(task));
 	return 1;
 }
@@ -219,13 +233,14 @@ static int kernel_task_exe_file(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
 	struct file *exe_file;
+
 	if (spin_is_locked(&task->alloc_lock)) {
 		lua_pushnil(L);
 		lua_pushstring(L, "busy");
 		return 2;
 	}
 	exe_file = get_task_exe_file(task);
-	if (exe_file == NULL)
+	if (!exe_file)
 		return 0;
 	*newgcfile(L) = exe_file;
 	return 1;
@@ -236,8 +251,10 @@ static int kernel_task_exepath(lua_State *L)
 	struct task_struct *task = totask(L, 1);
 	struct file *file;
 	int nres = 0;
+
 	if (task == current) {
 		struct mm_struct *mm = current->mm;
+
 		if (!mm)
 			return 0;
 		file = get_mm_exe_file(mm);
@@ -260,6 +277,7 @@ static int kernel_task_cmdline(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
 	char *cmdline = kstrdup_quotable_cmdline(task, lua_lsm_gfp());
+
 	lua_pushstring(L, cmdline);
 	kfree(cmdline);
 	return 1;
@@ -269,6 +287,7 @@ static int kernel_task_capable(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
 	int nres;
+
 	rcu_read_lock();
 	nres = aux_capable(L, __task_cred(task), 2);
 	rcu_read_unlock();
@@ -285,7 +304,7 @@ static int kernel_task_is_descendant(lua_State *L)
 	switch (tt) {
 	case LUA_TNUMBER:
 		parent = find_get_task_by_vpid((pid_t)lua_tointeger(L, 2));
-		if (parent == NULL)
+		if (!parent)
 			return luaL_argerror(L, 2, "invalid pid");
 		break;
 	case LUA_TUSERDATA:
@@ -319,6 +338,7 @@ static int kernel_task_is_descendant(lua_State *L)
 static int kernel_task_pid_alive(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
+
 	lua_pushboolean(L, pid_alive(task));
 	return 1;
 }
@@ -326,8 +346,9 @@ static int kernel_task_pid_alive(lua_State *L)
 static int meth_task_tostring(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
+
 	lua_pushfstring(L, "task: '%s'", task->comm);
-    return 1;
+	return 1;
 }
 
 static const luaL_Reg task_meth[] = {
@@ -353,6 +374,7 @@ static const luaL_Reg task_meth[] = {
 static int meth_task_gc(lua_State *L)
 {
 	struct task_struct **taskp = togctaskp(L, 1);
+
 	if (*taskp) {
 		put_task_struct(*taskp);
 		*taskp = NULL;
@@ -389,6 +411,7 @@ static int kernel_lsm_funcs(lua_State *L)
 		#undef LSM_HOOK
 	};
 	int i;
+
 	lua_createtable(L, ARRAY_SIZE(lsm_funcs), 0);
 	for (i = 0; i < ARRAY_SIZE(lsm_funcs); i++) {
 		lua_createtable(L, 3, 0);
@@ -408,6 +431,7 @@ static int kernel_random(lua_State *L)
 {
 	int l, u;
 	u32 r;
+
 	switch (lua_gettop(L)) {
 	case 0:
 		r = get_random_u32();
@@ -436,6 +460,7 @@ static int kernel_ktime_seconds(lua_State *L)
 {
 	int monotonic = lua_toboolean(L, 1);
 	time64_t sec;
+
 	if (monotonic)
 		sec = ktime_get_seconds();
 	else
@@ -460,7 +485,8 @@ static int kernel_task_from_pid(lua_State *L)
 {
 	pid_t nr = (pid_t)luaL_checkinteger(L, 1);
 	struct task_struct *task = find_get_task_by_vpid(nr);
-	if (task == NULL)
+
+	if (!task)
 		return 0;
 	*newgctask(L) = task;
 	return 1;
@@ -469,6 +495,7 @@ static int kernel_task_from_pid(lua_State *L)
 static int kernel_printk(lua_State *L)
 {
 	const char *s = luaL_checkstring(L, 1);
+
 	pr_info("%s\n", s);
 	return 0;
 }

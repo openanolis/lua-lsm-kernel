@@ -24,21 +24,49 @@
 static const char *family_tostring(sa_family_t sa_family)
 {
 	const char *family = NULL;
+
 	switch (sa_family) {
-	case AF_UNSPEC:		family = "unspec";	break;
-	case AF_INET:		family = "inet";	break;
-	case AF_INET6:		family = "inet6";	break;
-	case AF_UNIX:		family = "unix";	break;
-	case AF_NETLINK:	family = "netlink";	break;
-	case AF_PACKET:		family = "packet";	break;
-	case AF_KEY:		family = "key";		break;
-	case AF_APPLETALK:	family = "appletalk";	break;
-	case AF_ALG:		family = "alg";		break;
-	case AF_NFC:		family = "nfc";		break;
-	case AF_VSOCK:		family = "vsock";	break;
-	case AF_KCM:		family = "kcm";		break;
-	case AF_SMC:		family = "smc";		break;
+	case AF_UNSPEC:
+		family = "unspec";
+		break;
+	case AF_INET:
+		family = "inet";
+		break;
+	case AF_INET6:
+		family = "inet6";
+		break;
+	case AF_UNIX:
+		family = "unix";
+		break;
+	case AF_NETLINK:
+		family = "netlink";
+		break;
+	case AF_PACKET:
+		family = "packet";
+		break;
+	case AF_KEY:
+		family = "key";
+		break;
+	case AF_APPLETALK:
+		family = "appletalk";
+		break;
+	case AF_ALG:
+		family = "alg";
+		break;
+	case AF_NFC:
+		family = "nfc";
+		break;
+	case AF_VSOCK:
+		family = "vsock";
+		break;
+	case AF_KCM:
+		family = "kcm";
+		break;
+	case AF_SMC:
+		family = "smc";
+		break;
 	}
+
 	return family;
 }
 
@@ -56,6 +84,7 @@ static int net_sock_suites(lua_State *L)
 	struct sock *sk = tosock(L, 1);
 	const char *family = "unknown", *type = "unknown", *protocol = "unknown";
 	int nres = 0;
+
 	if (lua_gettop(L) >= 2) {
 		if (!lua_toboolean(L, 2))
 			family = NULL;
@@ -66,41 +95,85 @@ static int net_sock_suites(lua_State *L)
 	}
 	if (family) {
 		family = family_tostring(sk->sk_family);
-		if (family == NULL)
+		if (!family)
 			family = "unknown";
 		lua_pushstring(L, family);
 		nres += 1;
 	}
 	if (type) {
 		switch (sk->sk_type) {
-		case SOCK_STREAM:	type = "stream";	break;
-		case SOCK_DGRAM:	type = "dgram";		break;
-		case SOCK_RAW:		type = "raw";		break;
-		case SOCK_RDM:		type = "rdm";		break;
-		case SOCK_SEQPACKET:	type = "seqpacket";	break;
-		case SOCK_DCCP:		type = "dccp";		break;
-		case SOCK_PACKET:	type = "packet";	break;
+		case SOCK_STREAM:
+			type = "stream";
+			break;
+		case SOCK_DGRAM:
+			type = "dgram";
+			break;
+		case SOCK_RAW:
+			type = "raw";
+			break;
+		case SOCK_RDM:
+			type = "rdm";
+			break;
+		case SOCK_SEQPACKET:
+			type = "seqpacket";
+			break;
+		case SOCK_DCCP:
+			type = "dccp";
+			break;
+		case SOCK_PACKET:
+			type = "packet";
+			break;
 		}
 		lua_pushstring(L, type);
 		nres += 1;
 	}
 	if (protocol) {
 		switch (sk->sk_protocol) {
-		case IPPROTO_IP:	protocol = "ip";	break;
-		case IPPROTO_ICMP:	protocol = "icmp";	break;
-		case IPPROTO_IGMP:	protocol = "igmp";	break;
-		case IPPROTO_TCP:	protocol = "tcp";	break;
-		case IPPROTO_EGP:	protocol = "egp";	break;
-		case IPPROTO_UDP:	protocol = "udp";	break;
-		case IPPROTO_DCCP:	protocol = "dccp";	break;
-		case IPPROTO_IPV6:	protocol = "ipv6";	break;
-		case IPPROTO_ESP:	protocol = "esp";	break;
-		case IPPROTO_L2TP:	protocol = "l2tp";	break;
-		case IPPROTO_SCTP:	protocol = "sctp";	break;
-		case IPPROTO_UDPLITE:	protocol = "udplite";	break;
-		case IPPROTO_RAW:	protocol = "raw";	break;
-		case IPPROTO_SMC:	protocol = "smc";	break;
-		case IPPROTO_MPTCP:	protocol = "mptcp";	break;
+		case IPPROTO_IP:
+			protocol = "ip";
+			break;
+		case IPPROTO_ICMP:
+			protocol = "icmp";
+			break;
+		case IPPROTO_IGMP:
+			protocol = "igmp";
+			break;
+		case IPPROTO_TCP:
+			protocol = "tcp";
+			break;
+		case IPPROTO_EGP:
+			protocol = "egp";
+			break;
+		case IPPROTO_UDP:
+			protocol = "udp";
+			break;
+		case IPPROTO_DCCP:
+			protocol = "dccp";
+			break;
+		case IPPROTO_IPV6:
+			protocol = "ipv6";
+			break;
+		case IPPROTO_ESP:
+			protocol = "esp";
+			break;
+		case IPPROTO_L2TP:
+			protocol = "l2tp";
+			break;
+		case IPPROTO_SCTP:
+			protocol = "sctp";
+			break;
+		case IPPROTO_UDPLITE:
+			protocol = "udplite";
+			break;
+		case IPPROTO_RAW:
+			protocol = "raw";
+			break;
+		case IPPROTO_SMC:
+			protocol = "smc";
+			break;
+		case IPPROTO_MPTCP:
+			protocol = "mptcp";
+			break;
 		}
 		lua_pushstring(L, protocol);
 		nres += 1;
@@ -112,6 +185,7 @@ static int net_sock_listener(lua_State *L)
 {
 	struct sock *sk = tosock(L, 1);
 	int time_wait = lua_toboolean(L, 2);
+
 	lua_pushboolean(L, time_wait ? sk_listener_or_tw(sk) : sk_listener(sk));
 	return 1;
 }
@@ -147,6 +221,7 @@ static const luaL_Reg sock_meth[] = {
 static int net_socket_release(lua_State *L)
 {
 	struct socket **sockp = tosocketp(L, 1);
+
 	if (*sockp) {
 		sock_release(*sockp);
 		*sockp = NULL;
@@ -195,12 +270,23 @@ static int net_skb_protocol(lua_State *L)
 {
 	struct sk_buff *skb = toskb(L, 1);
 	const char *protocol = "unknown";
+
 	switch (skb->protocol) {
-	case htons(ETH_P_LOOP):	protocol = "loop";	break;
-	case htons(ETH_P_IP):	protocol = "ip";	break;
-	case htons(ETH_P_IPV6):	protocol = "ipv6";	break;
-	case htons(ETH_P_ARP):	protocol = "arp";	break;
-	case htons(ETH_P_RARP):	protocol = "rarp";	break;
+	case htons(ETH_P_LOOP):
+		protocol = "loop";
+		break;
+	case htons(ETH_P_IP):
+		protocol = "ip";
+		break;
+	case htons(ETH_P_IPV6):
+		protocol = "ipv6";
+		break;
+	case htons(ETH_P_ARP):
+		protocol = "arp";
+		break;
+	case htons(ETH_P_RARP):
+		protocol = "rarp";
+		break;
 	}
 	lua_pushstring(L, protocol);
 	return 1;
@@ -209,6 +295,7 @@ static int net_skb_protocol(lua_State *L)
 static int net_skb_iif(lua_State *L)
 {
 	struct sk_buff *skb = toskb(L, 1);
+
 	lua_pushinteger(L, skb->skb_iif);
 	return 1;
 }
@@ -216,6 +303,7 @@ static int net_skb_iif(lua_State *L)
 static int net_skb_secmark(lua_State *L)
 {
 	struct sk_buff *skb = toskb(L, 1);
+
 	lua_pushinteger(L, skb->secmark);
 	return 1;
 }
@@ -235,7 +323,8 @@ static int sockaddr_family(lua_State *L)
 {
 	struct sockaddr *sa = tosockaddr(L, 1);
 	const char *family = family_tostring(sa->sa_family);
-	if (family == NULL)
+
+	if (!family)
 		family = "unknown";
 	lua_pushstring(L, family);
 	return 1;
@@ -247,6 +336,7 @@ static int sockaddr_addrs(lua_State *L)
 	int readable = lua_toboolean(L, 2);
 	char buffer[128];
 	int l;
+
 	switch (sa->sa_family) {
 	case AF_INET:
 		lua_pushstring(L, "inet");
@@ -264,8 +354,9 @@ static int sockaddr_addrs(lua_State *L)
 			l = snprintf(buffer, sizeof(buffer), "%pISc", sa);
 			lua_pushlstring(L, buffer, l);
 		} else {
-			lua_pushlstring(L, ((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr,
-				sizeof(((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr));
+			lua_pushlstring(L,
+					((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr,
+					sizeof(((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr));
 		}
 		lua_pushinteger(L, ntohs(((struct sockaddr_in6 *)sa)->sin6_port));
 		return 3;
@@ -282,6 +373,7 @@ static int meth_sockaddr_tostring(lua_State *L)
 	struct sockaddr *sa = tosockaddr(L, 1);
 	char buffer[128];
 	int l;
+
 	switch (sa->sa_family) {
 	case AF_INET:
 		l = snprintf(buffer, sizeof(buffer), "sa.inet: %pISpc", sa);
@@ -316,8 +408,9 @@ static const luaL_Reg sockaddr_meth[] = {
 static int net_sock_alloc(lua_State *L)
 {
 	struct socket **sockp = newsocket(L);
+
 	*sockp = sock_alloc();
-	if (*sockp == NULL)
+	if (!*sockp)
 		return 0;
 	return 1;
 }
@@ -338,6 +431,7 @@ INET_HN_DEFINE(ntohs)
 static int net_in_aton(lua_State *L)
 {
 	const char *s = luaL_checkstring(L, 1);
+
 	lua_pushinteger(L, in_aton(s));
 	return 1;
 }
@@ -347,6 +441,7 @@ static int net_in4_pton(lua_State *L)
 	size_t len;
 	const char *s = luaL_checklstring(L, 1, &len);
 	__be32 addr;
+
 	if (in4_pton(s, (int)len, (u8 *)&addr, '\n', NULL))
 		lua_pushinteger(L, addr);
 	else
@@ -359,6 +454,7 @@ static int net_in6_pton(lua_State *L)
 	size_t len;
 	const char *s = luaL_checklstring(L, 1, &len);
 	__u8 addr[16];
+
 	if (in6_pton(s, (int)len, (u8 *)addr, '\n', NULL))
 		lua_pushlstring(L, addr, sizeof(addr));
 	else
@@ -377,7 +473,6 @@ static const luaL_Reg netlib[] = {
 	{ "in6_pton",	net_in6_pton	},
 	{ NULL, NULL }
 };
-
 
 LUALIB_API int luaopen_net(lua_State *L)
 {
