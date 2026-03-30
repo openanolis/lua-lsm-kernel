@@ -14,11 +14,11 @@
 #include <linux/ratelimit.h>
 #include <linux/pid.h>
 
-extern bool debug;
+extern bool lua_lsm_debug;
 
 #define __log_level(level, fmt, ...)					\
 	do {								\
-		if (debug)						\
+		if (lua_lsm_debug)					\
 			pr_ ## level("%s [%d]: %d %s - " fmt,		\
 				current->comm, task_pid_nr(current),	\
 				__LINE__, __func__, ##__VA_ARGS__);	\

@@ -29,11 +29,11 @@
 
 #ifdef DEBUG
 
-bool debug = true;
+bool lua_lsm_debug = true;
 
 static int __init disable_debug(char *str)
 {
-	debug = false;
+	lua_lsm_debug = false;
 	return 1;
 }
 __setup("lua.nodebug", disable_debug);
