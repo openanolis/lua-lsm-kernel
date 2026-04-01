@@ -2,6 +2,7 @@
 
 ## Build and enable
 
+- Enable `CONFIG_LUA`.
 - Enable `CONFIG_SECURITY_LUA_LSM`.
 - Include `lua` in the LSM order (CONFIG_LSM or kernel cmdline `lsm=`).
 - Optional:

@@ -22,6 +22,7 @@ local logo = [==[
 
 1) Enable kernel config options:
 
+- `CONFIG_LUA=y`
 - `CONFIG_SECURITY_LUA_LSM=y`
 - Optional: `CONFIG_SECURITY_LUA_LSM_STATS=y`
 - Optional: `CONFIG_SECURITY_LUA_LSM_DEBUG=y`
