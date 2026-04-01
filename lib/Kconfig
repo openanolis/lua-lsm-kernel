@@ -641,10 +641,18 @@ config ARCH_HAS_SETJMP
 	bool
 
 config SETJMP_ARCH
-	tristate
+	bool
 	depends on ARCH_HAS_SETJMP
 
 config LUA
-	tristate
+	bool "Lua support"
+	depends on ARCH_HAS_SETJMP
 	default n
 	select SETJMP_ARCH
+	help
+	  Build the in-kernel Lua core library for built-in users.
+
+	  This is required by subsystems that embed a Lua VM, such as
+	  SECURITY_LUA_LSM.
+
+	  If unsure, say N.
