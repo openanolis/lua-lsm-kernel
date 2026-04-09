@@ -513,6 +513,9 @@ int lua_object_get(lua_State *L, struct kvcache_dict *dict)
 {
 	struct lua_lsm_module *module;
 
+	if (!dict)
+		return 0;
+
 	module = module_from_object_fenv(L, 1);
 	if (!module)
 		return 0;
@@ -522,6 +525,9 @@ int lua_object_get(lua_State *L, struct kvcache_dict *dict)
 int lua_object_incr(lua_State *L, struct kvcache_dict *dict)
 {
 	struct lua_lsm_module *module;
+
+	if (!dict)
+		return kvcache_result(L, -ESRCH);
 
 	module = module_from_object_fenv(L, 1);
 	if (!module)
@@ -574,6 +580,9 @@ int lua_object_index(lua_State *L, struct kvcache_dict *dict)
 int lua_object_newindex(lua_State *L, struct kvcache_dict *dict)
 {
 	struct lua_lsm_module *module;
+
+	if (!dict)
+		return kvcache_result(L, -ESRCH);
 
 	module = module_from_object_fenv(L, 1);
 	if (!module)

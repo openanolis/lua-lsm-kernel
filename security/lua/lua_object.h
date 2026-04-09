@@ -53,7 +53,7 @@
 	{											\
 		ctype p = toraw ## name(L, 1);							\
 		struct lua_lsm_ ## blob *ll = lua_lsm_ ## name(p);				\
-		return lua_object_ ## fname(L, &ll->dict);					\
+		return lua_object_ ## fname(L, ll ? &ll->dict : NULL);				\
 	}
 
 #define LUA_OBJECT_FUNCS_DEFINE(name, ctype, has_kvcache)					\

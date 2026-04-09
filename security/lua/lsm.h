@@ -141,11 +141,15 @@ struct lua_lsm_object {
 
 static inline struct lua_lsm_object *lua_lsm_cred(const struct cred *cred)
 {
+	if (unlikely(!cred->security))
+		return NULL;
 	return cred->security + lua_lsm_blob_sizes.lbs_cred;
 }
 
 static inline struct lua_lsm_object *lua_lsm_file(const struct file *file)
 {
+	if (unlikely(!file->f_security))
+		return NULL;
 	return file->f_security + lua_lsm_blob_sizes.lbs_file;
 }
 
@@ -163,6 +167,8 @@ static inline struct lua_lsm_object *lua_lsm_inode(const struct inode *inode)
 
 static inline struct lua_lsm_object *lua_lsm_inode_rcu(void *inode_security)
 {
+	if (unlikely(!inode_security))
+		return NULL;
 	return inode_security + lua_lsm_blob_sizes.lbs_inode;
 }
 
@@ -173,11 +179,15 @@ static inline struct lua_lsm_object *lua_lsm_sock(const struct sock *sock)
 
 static inline struct lua_lsm_object *lua_lsm_superblock(const struct super_block *superblock)
 {
+	if (unlikely(!superblock->s_security))
+		return NULL;
 	return superblock->s_security + lua_lsm_blob_sizes.lbs_superblock;
 }
 
 static inline struct lua_lsm_object *lua_lsm_ipc(const struct kern_ipc_perm *ipc)
 {
+	if (unlikely(!ipc->security))
+		return NULL;
 	return ipc->security + lua_lsm_blob_sizes.lbs_ipc;
 }
 
@@ -188,6 +198,8 @@ static inline struct lua_lsm_object *lua_lsm_key(const struct key *key)
 
 static inline struct lua_lsm_object *lua_lsm_msgmsg(const struct msg_msg *msg)
 {
+	if (unlikely(!msg->security))
+		return NULL;
 	return msg->security + lua_lsm_blob_sizes.lbs_msg_msg;
 }
 
