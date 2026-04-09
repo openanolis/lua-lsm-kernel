@@ -8,6 +8,7 @@
 #ifndef _SECURITY_LUA_LSM_LUA_OBJECT_H
 #define _SECURITY_LUA_LSM_LUA_OBJECT_H
 
+#include <linux/stddef.h>
 #include "auxlib.h"
 #include "lsm.h"
 #include "kvcache.h"
