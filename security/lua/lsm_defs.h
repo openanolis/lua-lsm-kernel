@@ -22,21 +22,23 @@
 
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
 
+#define DECLARE_STATS_VARS()								\
+	u64 ___stats_start = 0
+
 #define START_STATS(NAME)								\
 	do {										\
-		ktime_t ___start = ktime_get();						\
-		s64 ___delta;								\
-		atomic_inc(&lua_lsm_hook_stats[__LL_NR_ ## NAME].count);
+		___stats_start = ktime_get_ns();					\
+	} while (0)
 
 #define END_STATS(NAME)									\
-		___delta = ktime_to_ns(ktime_get()) - ktime_to_ns(___start);		\
-		if (atomic64_read(&lua_lsm_hook_stats[__LL_NR_ ## NAME].maxtime) < ___delta)	\
-			atomic64_set(&lua_lsm_hook_stats[__LL_NR_ ## NAME].maxtime, ___delta);	\
-		atomic64_add(___delta, &lua_lsm_hook_stats[__LL_NR_ ## NAME].time);	\
+	do {										\
+		lua_lsm_hook_stats_record(__LL_NR_ ## NAME,				\
+			ktime_get_ns() - ___stats_start);				\
 	} while (0)
 
 #else
 
+#define DECLARE_STATS_VARS()
 #define START_STATS(NAME)
 #define END_STATS(NAME)
 
@@ -171,6 +173,7 @@
 	{										\
 		int idx;								\
 		int ret;								\
+		DECLARE_STATS_VARS();							\
 		START_STATS(NAME);							\
 		idx = srcu_read_lock(&modules_ss);					\
 		ret = __prepare_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));		\

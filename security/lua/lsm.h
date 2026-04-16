@@ -16,6 +16,7 @@
 #include <linux/lsm_hooks.h>
 #include <linux/spinlock.h>
 #include <linux/perf_event.h>
+#include <linux/u64_stats_sync.h>
 #include <linux/lua.h>
 #include "bitmap.h"
 #include "kvcache.h"
@@ -28,11 +29,6 @@ extern int lua_lsm_initialized __initdata;
 struct lua_lsm_hook_stat {
 	const char *name;
 	atomic_t nhooks;
-#ifdef CONFIG_SECURITY_LUA_LSM_STATS
-	atomic_t count;
-	atomic64_t time;        /* ns */
-	atomic64_t maxtime;
-#endif
 };
 
 extern struct lua_lsm_hook_stat lua_lsm_hook_stats[];
@@ -106,6 +102,7 @@ int lua_lsm_module_unregister(const char *name);
 int modules_show(struct seq_file *m, void *v);
 
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
+void lua_lsm_hook_stats_record(unsigned int nr, u64 delta);
 void lvm_stats_show(struct seq_file *m);
 int lsm_funcs_show(struct seq_file *m, void *v);
 #endif
