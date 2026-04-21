@@ -10,6 +10,7 @@
 #include "debug.h"
 #include <linux/init.h>
 #include <linux/bitops.h>
+#include <linux/kstrtox.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/printk.h>
@@ -263,7 +264,36 @@ static DEFINE_PER_CPU(struct lvm_state *, irq_lvms);
 static int lua_state_alloc(struct lvm_state *lvm);
 static void lua_state_free(struct lvm_state *lvm);
 
-#define LVM_POOL_MAX	8
+#define LUA_LVM_POOL_MAX_DEFAULT	8
+#define LUA_LVM_POOL_MAX_LIMIT		256
+
+static unsigned int lua_lvm_pool_max __read_mostly = LUA_LVM_POOL_MAX_DEFAULT;
+
+static int __init lua_lvm_pool_max_setup(char *str)
+{
+	unsigned int val;
+	int err;
+
+	if (!str || !*str)
+		return 1;
+
+	err = kstrtouint(str, 10, &val);
+	if (err) {
+		pr_warn("invalid lua.lvm_pool_max='%s', keeping %u\n",
+			str, lua_lvm_pool_max);
+		return 1;
+	}
+
+	if (val > LUA_LVM_POOL_MAX_LIMIT) {
+		pr_warn("lua.lvm_pool_max=%u exceeds limit %u, keeping %u\n",
+			val, LUA_LVM_POOL_MAX_LIMIT, lua_lvm_pool_max);
+		return 1;
+	}
+
+	WRITE_ONCE(lua_lvm_pool_max, val);
+	return 1;
+}
+__setup("lua.lvm_pool_max=", lua_lvm_pool_max_setup);
 
 struct lvm_pool_cpu {
 	struct lvm_state *head;
@@ -318,7 +348,7 @@ static void lvm_pool_put(struct lvm_state *lvm)
 	cpu = get_cpu();
 	pool = &per_cpu(lvm_pools, cpu);
 	raw_spin_lock_irqsave(&pool->lock, flags);
-	if (pool->count < LVM_POOL_MAX) {
+	if (pool->count < READ_ONCE(lua_lvm_pool_max)) {
 		lvm->next = pool->head;
 		pool->head = lvm;
 		pool->count++;
@@ -1386,7 +1416,8 @@ static int __init lua_lsm_init(void)
 	/* Report that Lua-LSM successfully initialized */
 	lua_lsm_initialized = 1;
 
-	pr_info("Lua based LSM initialized\n");
+	pr_info("Lua based LSM initialized (lvm_pool_max=%u)\n",
+		READ_ONCE(lua_lvm_pool_max));
 	return 0;
 }
 
