@@ -44,7 +44,7 @@ cat /sys/kernel/security/lua/version
 ## Boot-time tuning
 
 The per-CPU Lua VM pool size is controlled by the kernel command line
-parameter `lua.lvm_pool_max=`. The default is `8`.
+parameter `lua.lvm_pool_max=`. The default is `32`.
 
 Examples:
 

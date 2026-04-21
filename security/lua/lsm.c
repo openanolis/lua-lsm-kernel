@@ -264,7 +264,7 @@ static DEFINE_PER_CPU(struct lvm_state *, irq_lvms);
 static int lua_state_alloc(struct lvm_state *lvm);
 static void lua_state_free(struct lvm_state *lvm);
 
-#define LUA_LVM_POOL_MAX_DEFAULT	8
+#define LUA_LVM_POOL_MAX_DEFAULT	32
 #define LUA_LVM_POOL_MAX_LIMIT		256
 
 static unsigned int lua_lvm_pool_max __read_mostly = LUA_LVM_POOL_MAX_DEFAULT;
