@@ -47,6 +47,17 @@ enum {
 	__LL_NR_MAX
 };
 
+static inline bool lua_lsm_hook_supported(unsigned int nr)
+{
+	switch (nr) {
+	case __LL_NR_getprocattr:
+	case __LL_NR_setprocattr:
+		return false;
+	default:
+		return nr < __LL_NR_MAX;
+	}
+}
+
 struct lua_lsm_module_shdict {
 	struct list_head list;
 	struct kvcache_dict dict;

@@ -1386,6 +1386,7 @@ static int __init lua_lsm_init(void)
 	struct lvm_state *lvm;
 	int cpu;
 	int err;
+	int i;
 
 	for_each_possible_cpu(cpu)
 		lvm_pool_init_cpu(cpu);
@@ -1411,7 +1412,12 @@ static int __init lua_lsm_init(void)
 		per_cpu(irq_lvms, cpu) = lvm;
 	}
 
-	security_add_hooks(lua_lsm_hooks, ARRAY_SIZE(lua_lsm_hooks), &lua_lsmid);
+	/* Register only the hooks that Lua-LSM exposes to modules. */
+	for (i = 0; i < ARRAY_SIZE(lua_lsm_hooks); i++) {
+		if (!lua_lsm_hook_supported(i))
+			continue;
+		security_add_hooks(&lua_lsm_hooks[i], 1, &lua_lsmid);
+	}
 
 	/* Report that Lua-LSM successfully initialized */
 	lua_lsm_initialized = 1;

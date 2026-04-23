@@ -2419,10 +2419,7 @@ LUA_LSM_INT_DEFINE4(setselfattr, unsigned int, attr, struct lsm_ctx *, ctx,
 	lua_pushinteger(L, (lua_Integer)flags);
 }
 
-/**
- * TODO: getprocattr
- * Default: -EINVAL
- */
+/* Not registered by Lua-LSM. */
 LUA_LSM_INT_DEFINE3(getprocattr, struct task_struct *, p,
 		const char *, name, char **, value)
 {
@@ -2431,10 +2428,6 @@ LUA_LSM_INT_DEFINE3(getprocattr, struct task_struct *, p,
 	lua_pushnil(L);	/* TODO: value */
 }
 
-/**
- * setprocattr
- * Default: -EINVAL
- */
 LUA_LSM_INT_DEFINE3(setprocattr, const char *, name,
 		void *, value, size_t, size)
 {
