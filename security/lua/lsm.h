@@ -52,6 +52,7 @@ static inline bool lua_lsm_hook_supported(unsigned int nr)
 	switch (nr) {
 	case __LL_NR_getprocattr:
 	case __LL_NR_setprocattr:
+	case __LL_NR_lsmprop_to_secctx:
 		return false;
 	default:
 		return nr < __LL_NR_MAX;
