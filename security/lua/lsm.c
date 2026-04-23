@@ -199,6 +199,7 @@ void lvm_stats_show(struct seq_file *m)
 int lsm_funcs_show(struct seq_file *m, void *v)
 {
 	int i;
+	int n = 0;
 	int cpu;
 
 	seq_printf(m, "stats for lua-lsm (ns)\n");
@@ -210,6 +211,9 @@ int lsm_funcs_show(struct seq_file *m, void *v)
 		u64 count = 0;
 		u64 total = 0;
 		u64 maxtime = 0;
+
+		if (!lua_lsm_hook_supported(i))
+			continue;
 
 		for_each_possible_cpu(cpu) {
 			const struct lua_lsm_hook_pcpu_stat *stat;
@@ -231,7 +235,7 @@ int lsm_funcs_show(struct seq_file *m, void *v)
 		}
 
 		seq_printf(m, "%3d %-28s %4d %12llu %15llu %10llu %12llu\n",
-			   i + 1, lua_lsm_hook_stats[i].name,
+			   ++n, lua_lsm_hook_stats[i].name,
 			   atomic_read(&lua_lsm_hook_stats[i].nhooks),
 			   count, total, count ? total / count : 0, maxtime);
 	}
@@ -939,6 +943,13 @@ int lua_lsm_module_register(const char *code, size_t len)
 			for (i = 0; lua_lsm_hook_stats[i].name; i++) {
 				if (strcmp(lua_lsm_hook_stats[i].name, key) != 0)
 					continue;
+
+				if (!lua_lsm_hook_supported(i)) {
+					__log_err("hook '%s' is not supported by Lua-LSM\n",
+						  key);
+					err = -EOPNOTSUPP;
+					goto err_free_module;
+				}
 
 				if (!lua_isfunction(L, -1)) {
 					__log_err("field '%s' must be a function\n", key);

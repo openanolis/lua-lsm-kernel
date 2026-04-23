@@ -411,9 +411,19 @@ static int kernel_lsm_funcs(lua_State *L)
 		#undef LSM_HOOK
 	};
 	int i;
+	int n = 0;
 
-	lua_createtable(L, ARRAY_SIZE(lsm_funcs), 0);
 	for (i = 0; i < ARRAY_SIZE(lsm_funcs); i++) {
+		if (lua_lsm_hook_supported(i))
+			n++;
+	}
+
+	lua_createtable(L, n, 0);
+	n = 0;
+	for (i = 0; i < ARRAY_SIZE(lsm_funcs); i++) {
+		if (!lua_lsm_hook_supported(i))
+			continue;
+
 		lua_createtable(L, 3, 0);
 		lua_pushstring(L, lsm_funcs[i].funcname);
 		lua_rawseti(L, -2, 1);
@@ -421,8 +431,8 @@ static int kernel_lsm_funcs(lua_State *L)
 		lua_rawseti(L, -2, 2);
 		lua_pushinteger(L, lsm_funcs[i].nargs);
 		lua_rawseti(L, -2, 3);
-		/* res[i + 1] = { funcname, rtype, nargs } */
-		lua_rawseti(L, -2, i + 1);
+		/* res[n + 1] = { funcname, rtype, nargs } */
+		lua_rawseti(L, -2, ++n);
 	}
 	return 1;
 }
