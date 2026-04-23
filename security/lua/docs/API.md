@@ -11,7 +11,11 @@ Required fields:
 - `license` (string)
 - `version` (number)
 
-Hook functions are keyed by the LSM hook name (e.g. `file_open`).
+Hook functions are keyed by the supported LSM hook name (e.g. `file_open`).
+Use `kernel.lsm_funcs()` to enumerate the supported set. Lua-LSM does not
+expose unsupported hooks through its module APIs or observability output;
+the current unsupported set includes `getprocattr`, `setprocattr`, and
+`lsmprop_to_secctx`.
 
 Example:
 
@@ -59,6 +63,8 @@ From userspace (if stats enabled):
 ```
 cat /sys/kernel/security/lua/lsm_funcs
 ```
+
+Both interfaces list only hooks that Lua-LSM actually supports and registers.
 
 ## Built-in libraries
 

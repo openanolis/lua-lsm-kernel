@@ -28,7 +28,7 @@ cat /sys/kernel/security/lua/lsm_funcs
 ```
 
 Output columns:
-- `name`: LSM hook name
+- `name`: supported Lua-LSM hook name
 - `nlsm`: number of modules implementing the hook
 - `count`: invocation count
 - `total`: total time (ns)
