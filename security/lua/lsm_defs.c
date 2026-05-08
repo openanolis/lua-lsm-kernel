@@ -21,6 +21,7 @@
 #include <linux/syscalls.h>     /* for __MAP */
 #include <linux/timekeeping.h>  /* for ktime_get */
 #include <net/ipv6.h>
+#include <uapi/linux/un.h>
 #include <linux/lsm_hooks.h>
 #include <uapi/linux/lsm.h>
 #include <linux/lua.h>
@@ -2636,8 +2637,16 @@ static int build_sockaddr(lua_State *L, struct sockaddr *address, int addrlen)
 		if (addrlen < SIN6_LEN_RFC2133)
 			return 0;
 		break;
+	case AF_UNIX:
+		if (addrlen < offsetof(struct sockaddr_un, sun_path))
+			return 0;
+		break;
 	}
-	*newsockaddr(L) = address;
+	{
+		struct lua_sockaddr *p = newsockaddr(L);
+		p->addr = address;
+		p->addrlen = addrlen;
+	}
 	return 1;
 }
 
