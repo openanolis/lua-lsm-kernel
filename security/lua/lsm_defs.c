@@ -2658,7 +2658,8 @@ static int build_sockaddr(lua_State *L, struct sockaddr *address, int addrlen)
 			return 0;
 		break;
 	case AF_UNIX:
-		if (addrlen < offsetof(struct sockaddr_un, sun_path))
+		if (addrlen < offsetof(struct sockaddr_un, sun_path) ||
+		    addrlen > sizeof(struct sockaddr_un))
 			return 0;
 		break;
 	}
