@@ -1346,7 +1346,7 @@ LUA_LSM_INT_NAKED_DEFINE3(inode_listsecurity, struct inode *, inode,
 				const char *v = lua_tolstring(L, top, &len);
 				ret = (int)len;
 				if (buffer != NULL && len <= buffer_size)
-					memcpy(buffer, v, buffer_size);
+					memcpy(buffer, v, len);
 			}
 			break;
 		default:
@@ -1821,7 +1821,7 @@ LUA_LSM_INT_DEFINE2(kernel_load_data, enum kernel_load_data_id, id,
 LUA_LSM_INT_DEFINE4(kernel_post_load_data, char *, buf, loff_t, size,
 		enum kernel_load_data_id, id, char *, description)
 {
-	lua_pushstring(L, (const char *)buf);
+	lua_pushlstring(L, (const char *)buf, (size_t)size);
 	lua_pushinteger(L, (lua_Integer)size);
 	lua_pushnil(L);	/* TODO: id */
 	lua_pushstring(L, (const char *)description);
@@ -1847,7 +1847,7 @@ LUA_LSM_INT_DEFINE4(kernel_post_read_file, struct file *, file,
 		char *, buf, loff_t, size, enum kernel_read_file_id, id)
 {
 	*newfile(L) = file;
-	lua_pushstring(L, (const char *)buf);
+	lua_pushlstring(L, (const char *)buf, (size_t)size);
 	lua_pushinteger(L, (lua_Integer)size);
 	lua_pushnil(L);	/* TODO: id */
 }
