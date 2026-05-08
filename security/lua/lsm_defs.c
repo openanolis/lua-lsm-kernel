@@ -795,7 +795,13 @@ static int lua_lsm_init_xattr(lua_State *L, int name_idx, int value_idx,
 	memcpy(buffer + value_len, name, name_len);
 	buffer[value_len + name_len] = '\0';
 
-	/* security_inode_init_security() frees value but not name. */
+	/*
+	 * FIXME: xattr->name must not share xattr->value storage. Some
+	 * initxattrs users, notably OCFS2, duplicate only value and keep
+	 * the name pointer after security_inode_init_security() frees value.
+	 * This needs separate name storage with a lifetime that covers those
+	 * delayed users.
+	 */
 	xattr->value = buffer;
 	xattr->value_len = value_len;
 	xattr->name = buffer + value_len;
