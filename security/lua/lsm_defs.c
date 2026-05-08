@@ -770,9 +770,16 @@ LUA_LSM_VOID_DEFINE1(inode_free_security_rcu, void *, inode_security)
 	lua_pushnil(L);	/* TODO: inode_security */
 }
 
-static int lua_lsm_check_xattr(const char *name, size_t name_len,
-			       size_t value_len)
+static int lua_lsm_init_xattr(lua_State *L, int name_idx, int value_idx,
+			      struct xattr *xattr)
 {
+	size_t name_len, value_len;
+	const char *name, *value;
+	char *buffer;
+
+	name = lua_tolstring(L, name_idx, &name_len);
+	value = lua_tolstring(L, value_idx, &value_len);
+
 	if (!name_len || name_len > XATTR_NAME_MAX - XATTR_SECURITY_PREFIX_LEN)
 		return -EINVAL;
 	if (memchr(name, '\0', name_len))
@@ -780,6 +787,18 @@ static int lua_lsm_check_xattr(const char *name, size_t name_len,
 	if (value_len > XATTR_SIZE_MAX)
 		return -E2BIG;
 
+	buffer = kmalloc(value_len + name_len + 1, GFP_NOFS);
+	if (!buffer)
+		return -ENOMEM;
+
+	memcpy(buffer, value, value_len);
+	memcpy(buffer + value_len, name, name_len);
+	buffer[value_len + name_len] = '\0';
+
+	/* security_inode_init_security() frees value but not name. */
+	xattr->value = buffer;
+	xattr->value_len = value_len;
+	xattr->name = buffer + value_len;
 	return 0;
 }
 
@@ -794,7 +813,7 @@ static int lua_lsm_check_xattr(const char *name, size_t name_len,
  *   false        : -EPERM
  *   false, errno : -errno
  *   nil, errno   : -errno
- *   name, value  : fill the xattr struct, XXX: name must not be freed
+ *   name, value  : fill the xattr struct
  */
 LUA_LSM_INT_NAKED_DEFINE5(inode_init_security, struct inode *, inode,
 		struct inode *, dir, const struct qstr *, qstr,
@@ -836,29 +855,10 @@ LUA_LSM_INT_NAKED_DEFINE5(inode_init_security, struct inode *, inode,
 				ret = -errno;
 		} else if (lua_isstring(L, top) && lua_isstring(L, top + 1)) {
 			struct xattr *xattr;
-			const char *name;
-			const char *value;
-			size_t name_len, len;
 
 			xattr = lsm_get_xattr_slot(xattrs, xattr_count);
-			if (xattr) {
-				name = lua_tolstring(L, top, &name_len);
-				value = lua_tolstring(L, top + 1, &len);
-				ret = lua_lsm_check_xattr(name, name_len, len);
-				if (ret)
-					break;
-
-				xattr->value = kmemdup(value, len, GFP_NOFS);
-				if (xattr->value == NULL) {
-					ret = -ENOMEM;
-					break;
-				}
-				xattr->value_len = len;
-				xattr->name = name;
-				ret = 0;
-			} else {
-				/* TODO */
-			}
+			if (xattr)
+				ret = lua_lsm_init_xattr(L, top, top + 1, xattr);
 		}
 		break;
 	}
