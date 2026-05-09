@@ -1267,6 +1267,7 @@ int lua_lsm_module_unregister(const char *name)
 
 	if (atomic_sub_return(count, &module->nloaded) == 0) {
 		list_del_rcu(&module->list);
+		synchronize_srcu(&modules_ss);
 		lua_lsm_module_free(module);
 		err = 0;
 	} else {
