@@ -555,13 +555,15 @@ static int fs_filp_open(lua_State *L)
 	const char *filename = luaL_checkstring(L, 1);
 	int flags = luaL_checkinteger(L, 2);
 	umode_t mode = luaL_checkinteger(L, 3);
+	struct file *file;
 	struct file **filp = newgcfile(L);
-	*filp = filp_open(filename, flags, mode);
-	if (IS_ERR(*filp)) {
+	file = filp_open(filename, flags, mode);
+	if (IS_ERR(file)) {
 		lua_pushnil(L);
-		lua_pushinteger(L, PTR_ERR(*filp));
+		lua_pushinteger(L, PTR_ERR(file));
 		return 2;
 	}
+	*filp = file;
 	return 1;
 }
 
