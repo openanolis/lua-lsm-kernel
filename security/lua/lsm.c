@@ -475,6 +475,7 @@ static int lua_shared_index(lua_State *L)
 {
 	const char *name = luaL_checkstring(L, 2);
 	struct lua_lsm_module_shdict *shdict = NULL, *new = NULL, *shtmp;
+	struct lua_lsm_module_shdict **slot;
 	struct lua_lsm_module *module;
 	unsigned long flags;
 	int found = 0;
@@ -493,6 +494,9 @@ static int lua_shared_index(lua_State *L)
 	if (READ_ONCE(module->state) != LMS_STATE_LIVE)
 		return 0;
 
+	lua_pushvalue(L, 2);
+	slot = newshdict(L);
+
 	spin_lock_irqsave(&module->shdict_lock, flags);
 	list_for_each_entry(shtmp, &module->shdicts, list) {
 		if (strcmp(shtmp->name, name) == 0) {
@@ -507,7 +511,7 @@ static int lua_shared_index(lua_State *L)
 	spin_unlock_irqrestore(&module->shdict_lock, flags);
 
 	if (found && !shdict)
-		return 0;
+		goto err_pop_userdata;
 
 	if (!shdict) {
 		size_t l = strlen(name);
@@ -515,7 +519,7 @@ static int lua_shared_index(lua_State *L)
 		new = kzalloc(struct_size(new, name, l + 1), lua_lsm_gfp());
 		if (!new) {
 			__log_err("No memory\n");
-			return 0;
+			goto err_pop_userdata;
 		}
 		refcount_init(&new->refcount, 1);
 		kvcache_dict_init(&new->dict);
@@ -547,16 +551,19 @@ static int lua_shared_index(lua_State *L)
 	}
 
 	if (!shdict)
-		return 0;
+		goto err_pop_userdata;
 
 	/* shared[name] = shdict */
-	lua_pushvalue(L, 2);
-	*newshdict(L) = shdict;
+	*slot = shdict;
 	lua_rawset(L, 1);
 
 	lua_settop(L, 2);
 	lua_rawget(L, 1);
 	return 1;
+
+err_pop_userdata:
+	lua_settop(L, 2);
+	return 0;
 }
 
 static int lua_shared_newindex(lua_State *L)
