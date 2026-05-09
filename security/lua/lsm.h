@@ -9,6 +9,7 @@
 #define _SECURITY_LUA_LSM_LSM_H
 
 #include <linux/list.h>
+#include <linux/rcupdate.h>
 #include <linux/sched.h>
 #include <linux/fs.h>
 #include <linux/msg.h>
@@ -61,6 +62,10 @@ static inline bool lua_lsm_hook_supported(unsigned int nr)
 
 struct lua_lsm_module_shdict {
 	struct list_head list;
+	/* One ref for the module list, one per cached Lua userdata. */
+	atomic_t refcount;
+	struct rcu_head rcu;
+	bool dead;
 	struct kvcache_dict dict;
 	char name[];
 };

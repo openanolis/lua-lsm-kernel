@@ -474,8 +474,9 @@ void lvm_put(lua_State *L)
 static int lua_shared_index(lua_State *L)
 {
 	const char *name = luaL_checkstring(L, 2);
-	struct lua_lsm_module_shdict *shdict, *shtmp;
+	struct lua_lsm_module_shdict *shdict = NULL, *new = NULL, *shtmp;
 	struct lua_lsm_module *module;
+	unsigned long flags;
 	int found = 0;
 
 	__log_info_ratelimited("READ shared table, [%s] %s\n",
@@ -489,29 +490,37 @@ static int lua_shared_index(lua_State *L)
 		return 0;
 	}
 	module = lua_touserdata(L, -1);
+	if (READ_ONCE(module->state) != LMS_STATE_LIVE)
+		return 0;
 
-	rcu_read_lock();
-	list_for_each_entry_rcu(shdict, &module->shdicts, list) {
-		if (strcmp(shdict->name, name) == 0) {
+	spin_lock_irqsave(&module->shdict_lock, flags);
+	list_for_each_entry(shtmp, &module->shdicts, list) {
+		if (strcmp(shtmp->name, name) == 0) {
 			found = 1;
 			break;
 		}
 	}
-	rcu_read_unlock();
+	if (found && !READ_ONCE(shtmp->dead)) {
+		lua_lsm_shdict_get(shtmp);
+		shdict = shtmp;
+	}
+	spin_unlock_irqrestore(&module->shdict_lock, flags);
 
-	if (!found) {
-		unsigned long flags;
+	if (found && !shdict)
+		return 0;
+
+	if (!shdict) {
 		size_t l = strlen(name);
 
-		shdict = kmalloc(struct_size(shdict, name, l + 1),
-				 lua_lsm_gfp());
-		if (!shdict) {
+		new = kzalloc(struct_size(new, name, l + 1), lua_lsm_gfp());
+		if (!new) {
 			__log_err("No memory\n");
 			return 0;
 		}
-		kvcache_dict_init(&shdict->dict);
-		memcpy(shdict->name, name, l);
-		shdict->name[l] = '\0';
+		refcount_init(&new->refcount, 1);
+		kvcache_dict_init(&new->dict);
+		memcpy(new->name, name, l);
+		new->name[l] = '\0';
 
 		spin_lock_irqsave(&module->shdict_lock, flags);
 		list_for_each_entry(shtmp, &module->shdicts, list) {
@@ -520,23 +529,29 @@ static int lua_shared_index(lua_State *L)
 				break;
 			}
 		}
-		if (!found) {
+		if (found) {
+			if (!READ_ONCE(shtmp->dead)) {
+				lua_lsm_shdict_get(shtmp);
+				shdict = shtmp;
+			}
+		} else if (READ_ONCE(module->state) == LMS_STATE_LIVE) {
 			atomic_inc(&module->shdict_count);
-			list_add_tail_rcu(&shdict->list, &module->shdicts);
+			list_add_tail_rcu(&new->list, &module->shdicts);
+			lua_lsm_shdict_get(new);
+			shdict = new;
+			new = NULL;
 		}
 		spin_unlock_irqrestore(&module->shdict_lock, flags);
 
-		if (found) {
-			kvcache_dict_free(&shdict->dict);
-			kfree(shdict);
-
-			shdict = shtmp;
-		}
+		lua_lsm_shdict_put(new);
 	}
+
+	if (!shdict)
+		return 0;
 
 	/* shared[name] = shdict */
 	lua_pushvalue(L, 2);
-	*newshdict(L) = &shdict->dict;
+	*newshdict(L) = shdict;
 	lua_rawset(L, 1);
 
 	lua_settop(L, 2);
@@ -637,6 +652,8 @@ static int lua_modules_index(lua_State *L)
 	/* module queries are always run with a read lock */
 	list_for_each_entry_srcu(module, &lsm_modules, list,
 				 srcu_read_lock_held(&modules_ss)) {
+		if (READ_ONCE(module->state) != LMS_STATE_LIVE)
+			continue;
 		if (strcmp(module->name, key) != 0)
 			continue;
 
@@ -1159,6 +1176,7 @@ int lua_lsm_module_unregister(const char *name)
 	struct lua_lsm_module *module;
 	struct lua_lsm_module_shdict *shdict, *tmp;
 	int count = 0, nloaded, nbusy;
+	unsigned long flags;
 	unsigned int cpu;
 	int found = 0;
 	int err;
@@ -1189,12 +1207,15 @@ int lua_lsm_module_unregister(const char *name)
 
 	synchronize_srcu(&modules_ss);
 
-	list_for_each_entry_safe(shdict, tmp, &module->shdicts, list) {
-		list_del(&shdict->list);
-		kvcache_dict_free(&shdict->dict);
-		kfree(shdict);
-		atomic_dec(&module->shdict_count);
-	}
+	/*
+	 * Existing Lua userdata may outlive the VM purge attempt.  Tombstone
+	 * shared dicts now and drop the module list refs only once unregister
+	 * can complete.
+	 */
+	spin_lock_irqsave(&module->shdict_lock, flags);
+	list_for_each_entry(shdict, &module->shdicts, list)
+		WRITE_ONCE(shdict->dead, true);
+	spin_unlock_irqrestore(&module->shdict_lock, flags);
 
 	kvcache_module_nodes_gc(module);
 
@@ -1267,6 +1288,13 @@ int lua_lsm_module_unregister(const char *name)
 
 	if (atomic_sub_return(count, &module->nloaded) == 0) {
 		list_del_rcu(&module->list);
+		spin_lock_irqsave(&module->shdict_lock, flags);
+		list_for_each_entry_safe(shdict, tmp, &module->shdicts, list) {
+			list_del_rcu(&shdict->list);
+			atomic_dec(&module->shdict_count);
+			lua_lsm_shdict_put(shdict);
+		}
+		spin_unlock_irqrestore(&module->shdict_lock, flags);
 		synchronize_srcu(&modules_ss);
 		lua_lsm_module_free(module);
 		err = 0;

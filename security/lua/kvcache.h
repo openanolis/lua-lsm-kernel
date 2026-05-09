@@ -19,6 +19,7 @@
 #define CACHE_CAPACITY	1024
 
 struct lua_lsm_module;
+struct lua_lsm_module_shdict;
 
 struct kvcache_node {
 	const char *key;
@@ -67,11 +68,15 @@ int lua_object_newindex(lua_State *L, struct kvcache_dict *dict);
 #define METH_SHARED_DICT	"meth_shared_dict"
 
 #define newshdict(L)							\
-	((struct kvcache_dict **)newcptr((L), METH_SHARED_DICT))
+	((struct lua_lsm_module_shdict **)				\
+		newcptr((L), METH_SHARED_DICT))
 #define toshdictp(L, idx)						\
-	((struct kvcache_dict **)luaL_checkudata((L), (idx), METH_SHARED_DICT))
+	((struct lua_lsm_module_shdict **)				\
+		luaL_checkudata((L), (idx), METH_SHARED_DICT))
 #define toshdict(L, idx)	(*toshdictp(L, idx))
 
+void lua_lsm_shdict_get(struct lua_lsm_module_shdict *shdict);
+void lua_lsm_shdict_put(struct lua_lsm_module_shdict *shdict);
 int shdict_init(lua_State *L);
 
 #endif  /* ! _SECURITY_LUA_LSM_KVCACHE_H */
