@@ -298,14 +298,16 @@ static int kernel_task_is_descendant(lua_State *L)
 {
 	struct task_struct *child = totask(L, 1);
 	struct task_struct *parent;
+	struct task_struct *parent_ref = NULL;
 	int tt = lua_type(L, 2);
 	int res = 0;
 
 	switch (tt) {
 	case LUA_TNUMBER:
-		parent = find_get_task_by_vpid((pid_t)lua_tointeger(L, 2));
-		if (!parent)
+		parent_ref = find_get_task_by_vpid((pid_t)lua_tointeger(L, 2));
+		if (!parent_ref)
 			return luaL_argerror(L, 2, "invalid pid");
+		parent = parent_ref;
 		break;
 	case LUA_TUSERDATA:
 		parent = totask(L, 2);
@@ -328,8 +330,8 @@ static int kernel_task_is_descendant(lua_State *L)
 	}
 	rcu_read_unlock();
 
-	if (tt == LUA_TNUMBER)
-		put_task_struct(parent);
+	if (parent_ref)
+		put_task_struct(parent_ref);
 
 	lua_pushboolean(L, res);
 	return 1;
