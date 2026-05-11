@@ -540,6 +540,8 @@ int arg2cap(lua_State *L, int idx)
 	default:
 		return luaL_argerror(L, idx, "integer or string expected");
 	}
+	if (!cap_valid(cap))
+		return luaL_argerror(L, idx, "invalid capability");
 	return cap;
 }
 
