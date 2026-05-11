@@ -68,8 +68,9 @@ static int fs_dentry_dput(lua_State *L)
 static int fs_dentry_backing_inode(lua_State *L)
 {
 	struct dentry *dentry = todentry(L, 1);
+	struct inode *inode = d_backing_inode(dentry);
 
-	*newinode(L) = d_backing_inode(dentry);
+	inode ? *newinode(L) = inode : lua_pushnil(L);
 	return 1;
 }
 

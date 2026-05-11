@@ -75,7 +75,9 @@ static const char *family_tostring(sa_family_t sa_family)
 static int net_sock_socket(lua_State *L)
 {
 	struct sock *sk = tosock(L, 1);
-	*newsocket(L) = sk->sk_socket;
+	struct socket *sock = sk->sk_socket;
+
+	sock ? *newsocket(L) = sock : lua_pushnil(L);
 	return 1;
 }
 
@@ -232,7 +234,9 @@ static int net_socket_release(lua_State *L)
 static int net_socket_sock(lua_State *L)
 {
 	struct socket *sock = tosocket(L, 1);
-	*newsock(L) = sock->sk;
+	struct sock *sk = sock->sk;
+
+	sk ? *newsock(L) = sk : lua_pushnil(L);
 	return 1;
 }
 
@@ -255,14 +259,18 @@ static const luaL_Reg socket_meth[] = {
 static int net_skb_sock(lua_State *L)
 {
 	struct sk_buff *skb = toskb(L, 1);
-	*newsock(L) = skb->sk;
+	struct sock *sk = skb->sk;
+
+	sk ? *newsock(L) = sk : lua_pushnil(L);
 	return 1;
 }
 
 static int net_skb_full_sk(lua_State *L)
 {
 	struct sk_buff *skb = toskb(L, 1);
-	*newsock(L) = skb_to_full_sk(skb);
+	struct sock *sk = skb_to_full_sk(skb);
+
+	sk ? *newsock(L) = sk : lua_pushnil(L);
 	return 1;
 }
 
