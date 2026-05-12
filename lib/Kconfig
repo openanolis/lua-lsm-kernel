@@ -637,22 +637,13 @@ config UNION_FIND
 config MIN_HEAP
 	bool
 
-config ARCH_HAS_SETJMP
-	bool
-
-config SETJMP_ARCH
+config HAS_LUA
 	bool
 	depends on ARCH_HAS_SETJMP
+	default y
 
 config LUA
-	bool "Lua support"
-	depends on ARCH_HAS_SETJMP
+	tristate
+	depends on HAS_LUA
+	select ARCH_SETJMP
 	default n
-	select SETJMP_ARCH
-	help
-	  Build the in-kernel Lua core library for built-in users.
-
-	  This is required by subsystems that embed a Lua VM, such as
-	  SECURITY_LUA_LSM.
-
-	  If unsure, say N.

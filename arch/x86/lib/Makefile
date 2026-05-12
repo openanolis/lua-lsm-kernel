@@ -41,7 +41,7 @@ lib-$(CONFIG_MITIGATION_RETPOLINE) += retpoline.o
 obj-y += msr.o msr-reg.o msr-reg-export.o hweight.o
 obj-y += iomem.o
 
-obj-$(CONFIG_SETJMP_ARCH) += setjmp_$(BITS).o
+obj-$(CONFIG_ARCH_SETJMP) += setjmp_$(BITS).o
 
 ifeq ($(CONFIG_X86_32),y)
         obj-y += atomic64_32.o

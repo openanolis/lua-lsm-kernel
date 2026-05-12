@@ -2,11 +2,11 @@
 
 config SECURITY_LUA_LSM
 	bool "Lua based LSM Support"
-	depends on SECURITY
-	depends on LUA
+	depends on SECURITY && HAS_LUA
+	select LUA
 	default n
 	help
-	  This enables the Lua based LSM.
+	  This selects the Lua based LSM.
 	  If you are unsure how to answer this question, answer N.
 
 config SECURITY_LUA_LSM_STATS

@@ -345,6 +345,15 @@ config ARCH_HAS_SET_MEMORY
 config ARCH_HAS_SET_DIRECT_MAP
 	bool
 
+# Select if arch has all setjmp/longjmp() functions
+config ARCH_HAS_SETJMP
+	bool
+
+config ARCH_SETJMP
+	bool
+	depends on ARCH_HAS_SETJMP
+	default n
+
 #
 # Select if the architecture provides the arch_dma_set_uncached symbol to
 # either provide an uncached segment alias for a DMA allocation, or
