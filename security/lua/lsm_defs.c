@@ -1919,7 +1919,6 @@ LUA_LSM_INT_DEFINE4(kernel_post_load_data, char *, buf, loff_t, size,
 		enum kernel_load_data_id, id, char *, description)
 {
 	lua_pushlstring(L, (const char *)buf, (size_t)size);
-	lua_pushinteger(L, (lua_Integer)size);
 	lua_pushstring(L, kernel_load_data_id_str(id));
 	lua_pushstring(L, (const char *)description);
 }
@@ -1945,7 +1944,6 @@ LUA_LSM_INT_DEFINE4(kernel_post_read_file, struct file *, file,
 {
 	*newfile(L) = file;
 	lua_pushlstring(L, (const char *)buf, (size_t)size);
-	lua_pushinteger(L, (lua_Integer)size);
 	lua_pushstring(L, kernel_read_file_id_str(id));
 }
 
