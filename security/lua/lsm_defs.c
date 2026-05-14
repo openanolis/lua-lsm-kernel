@@ -22,6 +22,7 @@
 #include <linux/prctl.h>
 #include <linux/syscalls.h>     /* for __MAP */
 #include <linux/timekeeping.h>  /* for ktime_get */
+#include <linux/kernel_read_file.h>
 #include <net/ipv6.h>
 #include <linux/lsm_hooks.h>
 #include <uapi/linux/lsm.h>
@@ -1900,18 +1901,18 @@ LUA_LSM_INT_DEFINE1(kernel_module_request, char *, kmod_name)
 }
 
 /**
- * TODO: kernel_load_data
+ * kernel_load_data
  * Default: 0
  */
 LUA_LSM_INT_DEFINE2(kernel_load_data, enum kernel_load_data_id, id,
 		bool, contents)
 {
-	lua_pushnil(L);	/* TODO: id */
+	lua_pushstring(L, kernel_load_data_id_str(id));
 	lua_pushboolean(L, (int)contents);
 }
 
 /**
- * TODO: kernel_post_load_data
+ * kernel_post_load_data
  * Default: 0
  */
 LUA_LSM_INT_DEFINE4(kernel_post_load_data, char *, buf, loff_t, size,
@@ -1919,24 +1920,24 @@ LUA_LSM_INT_DEFINE4(kernel_post_load_data, char *, buf, loff_t, size,
 {
 	lua_pushlstring(L, (const char *)buf, (size_t)size);
 	lua_pushinteger(L, (lua_Integer)size);
-	lua_pushnil(L);	/* TODO: id */
+	lua_pushstring(L, kernel_load_data_id_str(id));
 	lua_pushstring(L, (const char *)description);
 }
 
 /**
- * TODO: kernel_read_file
+ * kernel_read_file
  * Default: 0
  */
 LUA_LSM_INT_DEFINE3(kernel_read_file, struct file *, file,
 		enum kernel_read_file_id, id, bool, contents)
 {
 	*newfile(L) = file;
-	lua_pushnil(L);	/* TODO: id */
+	lua_pushstring(L, kernel_read_file_id_str(id));
 	lua_pushboolean(L, (int)contents);
 }
 
 /**
- * TODO: kernel_post_read_file
+ * kernel_post_read_file
  * Default: 0
  */
 LUA_LSM_INT_DEFINE4(kernel_post_read_file, struct file *, file,
@@ -1945,7 +1946,7 @@ LUA_LSM_INT_DEFINE4(kernel_post_read_file, struct file *, file,
 	*newfile(L) = file;
 	lua_pushlstring(L, (const char *)buf, (size_t)size);
 	lua_pushinteger(L, (lua_Integer)size);
-	lua_pushnil(L);	/* TODO: id */
+	lua_pushstring(L, kernel_read_file_id_str(id));
 }
 
 static void build_lsm_setid_flags(lua_State *L, int flags)
