@@ -211,6 +211,15 @@ void luaL_requiref(lua_State *L, const char *modname,
 	}
 }
 
+const struct cflag_opt lua_lsm_cap_opts[] = {
+	{ "noaudit",	CAP_OPT_NOAUDIT		},
+	{ "insetid",	CAP_OPT_INSETID		},
+	{ NULL, 0 }
+};
+
+const unsigned int lua_lsm_cap_opt_flags = CAP_OPT_NOAUDIT |
+	CAP_OPT_INSETID;
+
 unsigned int tocflags(lua_State *L, int idx, int top,
 		      const struct cflag_opt *opts, unsigned int d)
 {
@@ -548,16 +557,14 @@ int arg2cap(lua_State *L, int idx)
 /*
  * [task:]capable(CAP_MAC_ADMIN)
  * [task:]capable('mac_admin')
+ * [task:]capable(ns, CAP_MAC_ADMIN)
  * [task:]capable(task, 'mac_admin')
  * [task:]capable(task, 'mac_admin', 'noaudit', 'insetid')
  */
-int aux_capable(lua_State *L, const struct cred *cred, int idx)
+int aux_capable(lua_State *L, const struct cred *cred,
+		struct user_namespace *default_ns, int idx)
 {
-	static const struct cflag_opt opts[] = {
-		{ "noaudit",	CAP_OPT_NOAUDIT		},
-		{ "insetid",	CAP_OPT_INSETID		},
-		{ NULL, 0 }
-	};
+	struct user_namespace *ns = default_ns;
 	unsigned int opt = CAP_OPT_NONE;
 	int top = lua_gettop(L);
 	int cap;
@@ -568,13 +575,21 @@ int aux_capable(lua_State *L, const struct cred *cred, int idx)
 
 	if (top == idx) {
 		cap = arg2cap(L, idx);
-		err = cap_capable(cred, current_user_ns(), cap, opt);
+		err = cap_capable(cred, ns, cap, opt);
+	} else if (tousernsp(L, idx)) {
+		ns = touserns(L, idx);
+		cap = arg2cap(L, idx + 1);
+		if (top >= idx + 2)
+			opt = tocflags(L, idx + 2, top,
+				       lua_lsm_cap_opts, CAP_OPT_NONE);
+		err = cap_capable(cred, ns, cap, opt);
 	} else {
 		struct task_struct *task = totask(L, idx);
 
 		cap = arg2cap(L, idx + 1);
 		if (top >= idx + 2)
-			opt = tocflags(L, idx + 2, top, opts, CAP_OPT_NONE);
+			opt = tocflags(L, idx + 2, top,
+				       lua_lsm_cap_opts, CAP_OPT_NONE);
 
 		rcu_read_lock();
 		err = cap_capable(cred, __task_cred(task)->user_ns, cap, opt);

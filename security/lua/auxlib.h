@@ -14,6 +14,7 @@
 struct cred;
 struct dentry;
 struct file;
+struct user_namespace;
 
 static inline gfp_t lua_lsm_gfp(void)
 {
@@ -53,6 +54,9 @@ struct cflag_opt {
 	unsigned int flag;
 };
 
+extern const struct cflag_opt lua_lsm_cap_opts[];
+extern const unsigned int lua_lsm_cap_opt_flags;
+
 unsigned int tocflags(lua_State *L, int idx, int top,
 		      const struct cflag_opt *opts, unsigned int d);
 
@@ -86,6 +90,7 @@ int aux_file_path(lua_State *L, struct file *filp);
 int aux_dentry_path(lua_State *L, struct dentry *dentry, int rawpath);
 
 int arg2cap(lua_State *L, int idx);
-int aux_capable(lua_State *L, const struct cred *cred, int idx);
+int aux_capable(lua_State *L, const struct cred *cred,
+		struct user_namespace *default_ns, int idx);
 
 #endif /* ! _SECURITY_LUA_LSM_AUXLIB_H */

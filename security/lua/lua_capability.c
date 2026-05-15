@@ -7,6 +7,7 @@
 
 #include "debug.h"
 #include <linux/capability.h>
+#include <linux/cred.h>
 #include "lsm.h"
 #include "auxlib.h"
 #include "lua_object.h"
@@ -158,7 +159,7 @@ static int capability_cap_full(lua_State *L)
 
 static int capability_capable(lua_State *L)
 {
-	return aux_capable(L, current_cred(), 1);
+	return aux_capable(L, current_cred(), current_user_ns(), 1);
 }
 
 static const luaL_Reg capabilitylib[] = {

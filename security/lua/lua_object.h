@@ -129,6 +129,7 @@
 #define LUA_OBJECTS_LIST									\
 	LUA_OBJECT(task,	kernel,		task,		struct task_struct *,	NULL)	\
 	LUA_OBJECT(object,	kernel,		cred,		struct cred *,		NULL)	\
+	LUA_OBJECT(func,	kernel,		userns,		struct user_namespace *, NULL)	\
 	LUA_OBJECT(func,	kernel,		perfevent,	struct perf_event *,	NULL)	\
 	LUA_OBJECT(object,	ipc,		ipc,		struct kern_ipc_perm *,	NULL)	\
 	LUA_OBJECT(object,	ipc,		msgmsg,		struct msg_msg *,	NULL)	\

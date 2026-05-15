@@ -198,16 +198,16 @@ LUA_LSM_INT_DEFINE5(capset, struct cred *, new, const struct cred *, old,
 }
 
 /**
- * TODO: capable
+ * capable
  * Default: 0
  */
 LUA_LSM_INT_DEFINE4(capable, const struct cred *, cred,
 		struct user_namespace *, ns, int, cap, unsigned int, opts)
 {
 	*(const struct cred **)newcred(L) = cred;
-	lua_pushnil(L);	/* TODO: ns */
+	*newuserns(L) = ns;
 	lua_pushinteger(L, (lua_Integer)cap);
-	lua_pushinteger(L, (lua_Integer)opts);
+	table_fromopts(L, lua_lsm_cap_opts, lua_lsm_cap_opt_flags, opts);
 }
 
 /**

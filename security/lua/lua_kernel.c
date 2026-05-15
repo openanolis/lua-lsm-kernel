@@ -11,6 +11,7 @@
 #include <linux/printk.h>
 #include <linux/security.h>
 #include <linux/ptrace.h>
+#include <linux/user_namespace.h>
 #include <linux/lua.h>
 #include <linux/lualib.h>
 #include <linux/lauxlib.h>
@@ -132,6 +133,21 @@ static int kernel_cred_securebits(lua_State *L)
 	return 0;
 }
 
+static int kernel_cred_userns(lua_State *L)
+{
+	const struct cred *cred = tocred(L, 1);
+
+	*newgcuserns(L) = get_user_ns(cred->user_ns);
+	return 1;
+}
+
+static int kernel_cred_capable(lua_State *L)
+{
+	const struct cred *cred = tocred(L, 1);
+
+	return aux_capable(L, cred, cred->user_ns, 2);
+}
+
 static const luaL_Reg cred_meth[] = {
 	{ "uids",		kernel_cred_uids	},
 	{ "gids",		kernel_cred_gids	},
@@ -139,6 +155,96 @@ static const luaL_Reg cred_meth[] = {
 	{ "cap_bset",		kernel_cred_cap_bset	},
 	{ "cap_ambient",	kernel_cred_cap_ambient	},
 	{ "securebits",		kernel_cred_securebits	},
+	{ "userns",		kernel_cred_userns	},
+	{ "capable",		kernel_cred_capable	},
+	{ NULL, NULL }
+};
+
+/********************************* userns *********************************/
+
+static int kernel_userns_is_initial(lua_State *L)
+{
+	struct user_namespace *ns = touserns(L, 1);
+
+	lua_pushboolean(L, ns == &init_user_ns);
+	return 1;
+}
+
+static int kernel_userns_level(lua_State *L)
+{
+	struct user_namespace *ns = touserns(L, 1);
+
+	lua_pushinteger(L, ns->level);
+	return 1;
+}
+
+static int kernel_userns_owner_uid(lua_State *L)
+{
+	struct user_namespace *ns = touserns(L, 1);
+
+	lua_pushinteger(L, (lua_Integer)ns->owner.val);
+	return 1;
+}
+
+static int kernel_userns_owner_gid(lua_State *L)
+{
+	struct user_namespace *ns = touserns(L, 1);
+
+	lua_pushinteger(L, (lua_Integer)ns->group.val);
+	return 1;
+}
+
+static int kernel_userns_inum(lua_State *L)
+{
+	struct user_namespace *ns = touserns(L, 1);
+
+	lua_pushinteger(L, (lua_Integer)ns->ns.inum);
+	return 1;
+}
+
+static int kernel_userns_same(lua_State *L)
+{
+	struct user_namespace *ns = touserns(L, 1);
+	struct user_namespace *other = touserns(L, 2);
+
+	lua_pushboolean(L, ns == other);
+	return 1;
+}
+
+static int meth_userns_tostring(lua_State *L)
+{
+	struct user_namespace *ns = touserns(L, 1);
+
+	lua_pushfstring(L, "userns: <inum = %d, level = %d>",
+			(int)ns->ns.inum, ns->level);
+	return 1;
+}
+
+static const luaL_Reg userns_meth[] = {
+	{ "is_initial",	kernel_userns_is_initial	},
+	{ "level",	kernel_userns_level		},
+	{ "owner_uid",	kernel_userns_owner_uid		},
+	{ "owner_gid",	kernel_userns_owner_gid		},
+	{ "inum",	kernel_userns_inum		},
+	{ "same",	kernel_userns_same		},
+	{ "__tostring",	meth_userns_tostring		},
+	{ NULL, NULL }
+};
+
+static int meth_userns_gc(lua_State *L)
+{
+	struct user_namespace **nsp = togcusernsp(L, 1);
+
+	if (*nsp) {
+		put_user_ns(*nsp);
+		*nsp = NULL;
+	}
+	return 0;
+}
+
+static const luaL_Reg userns_gc_meth[] = {
+	{ "__tostring",	meth_userns_tostring		},
+	{ "__gc",	meth_userns_gc			},
 	{ NULL, NULL }
 };
 
@@ -157,6 +263,16 @@ static int kernel_task_cred(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
 	*(const struct cred **)newcred(L) = get_task_cred(task);
+	return 1;
+}
+
+static int kernel_task_userns(lua_State *L)
+{
+	struct task_struct *task = totask(L, 1);
+	const struct cred *cred = get_task_cred(task);
+
+	*newgcuserns(L) = get_user_ns(cred->user_ns);
+	put_cred(cred);
 	return 1;
 }
 
@@ -286,10 +402,12 @@ static int kernel_task_cmdline(lua_State *L)
 static int kernel_task_capable(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
+	const struct cred *cred;
 	int nres;
 
 	rcu_read_lock();
-	nres = aux_capable(L, __task_cred(task), 2);
+	cred = __task_cred(task);
+	nres = aux_capable(L, cred, cred->user_ns, 2);
 	rcu_read_unlock();
 	return nres;
 }
@@ -356,6 +474,7 @@ static int meth_task_tostring(lua_State *L)
 static const luaL_Reg task_meth[] = {
 	{ "pids",			kernel_task_pids		},
 	{ "cred",			kernel_task_cred		},
+	{ "userns",			kernel_task_userns		},
 	{ "comm",			kernel_task_comm		},
 	{ "nr_threads",			kernel_task_nr_threads		},
 	{ "group_leader",		kernel_task_group_leader	},
@@ -558,6 +677,7 @@ LUALIB_API int luaopen_kernel(lua_State *L)
 	luaL_newlib(L, kernellib);
 	create_task_meta(L, task_meth, task_gc_meth);
 	create_cred_meta(L, cred_meth, NULL);
+	create_userns_meta(L, userns_meth, userns_gc_meth);
 	create_perfevent_meta(L, NULL, NULL);
 	create_ipc_meta(L, NULL, NULL);
 	create_msgmsg_meta(L, NULL, NULL);
