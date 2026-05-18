@@ -18,6 +18,7 @@
 #include <linux/security.h>
 #include <linux/xattr.h>
 #include <linux/cred.h>
+#include <linux/mnt_idmapping.h>
 #include <linux/prctl.h>
 #include <linux/syscalls.h>     /* for __MAP */
 #include <linux/timekeeping.h>  /* for ktime_get */
@@ -1020,8 +1021,103 @@ LUA_LSM_INT_DEFINE2(inode_permission, struct inode *, inode, int, mask)
 	lua_pushinteger(L, (lua_Integer)mask);
 }
 
+static void iattr_set_time(lua_State *L, const char *name,
+			   const struct timespec64 *ts)
+{
+	lua_createtable(L, 0, 2);
+	lua_pushinteger(L, ts->tv_sec);
+	lua_setfield(L, -2, "sec");
+	lua_pushinteger(L, ts->tv_nsec);
+	lua_setfield(L, -2, "nsec");
+	lua_setfield(L, -2, name);
+}
+
+static void iattr_set_integer(lua_State *L, const char *name, long long value)
+{
+	lua_pushinteger(L, value);
+	lua_setfield(L, -2, name);
+}
+
+static void iattr_set_flags(lua_State *L, unsigned int mask)
+{
+	static const struct cflag_opt fields[] = {
+		{ "atime_set",	ATTR_ATIME_SET	},
+		{ "mtime_set",	ATTR_MTIME_SET	},
+		{ "ctime_set",	ATTR_CTIME_SET	},
+		{ "times_set",	ATTR_TIMES_SET	},
+		{ "touch",	ATTR_TOUCH	},
+		{ "force",	ATTR_FORCE	},
+		{ "kill_suid",	ATTR_KILL_SUID	},
+		{ "kill_sgid",	ATTR_KILL_SGID	},
+		{ "kill_priv",	ATTR_KILL_PRIV	},
+		{ "from_file",	ATTR_FILE	},
+		{ "from_open",	ATTR_OPEN	},
+		{ "delegated",	ATTR_DELEG	},
+		{ NULL, 0 }
+	};
+	int i;
+
+	for (i = 0; fields[i].name; i++) {
+		if (mask & fields[i].flag) {
+			lua_pushboolean(L, 1);
+			lua_setfield(L, -2, fields[i].name);
+		}
+	}
+}
+
+static void iattr_set_ids(lua_State *L, struct mnt_idmap *idmap,
+			  const struct inode *inode, const struct iattr *attr)
+{
+	unsigned int ia_valid = attr->ia_valid;
+	kuid_t uid;
+	kgid_t gid;
+
+	if (ia_valid & ATTR_UID) {
+		uid = from_vfsuid(idmap, i_user_ns(inode), attr->ia_vfsuid);
+		if (uid_valid(uid)) {
+			lua_pushinteger(L, uid.val);
+			lua_setfield(L, -2, "uid");
+		}
+	}
+	if (ia_valid & ATTR_GID) {
+		gid = from_vfsgid(idmap, i_user_ns(inode), attr->ia_vfsgid);
+		if (gid_valid(gid)) {
+			lua_pushinteger(L, gid.val);
+			lua_setfield(L, -2, "gid");
+		}
+	}
+}
+
+static void newiattr(lua_State *L, struct mnt_idmap *idmap,
+		     struct dentry *dentry, const struct iattr *attr)
+{
+	struct inode *inode = d_backing_inode(dentry);
+	unsigned int ia_valid = attr->ia_valid;
+
+	luaL_checkstack(L, 32, "iattr");
+	lua_createtable(L, 0, 20);
+
+	iattr_set_integer(L, "valid", ia_valid);
+
+	if (ia_valid & ATTR_MODE)
+		iattr_set_integer(L, "mode", attr->ia_mode);
+	if (inode)
+		iattr_set_ids(L, idmap, inode, attr);
+	if (ia_valid & ATTR_SIZE)
+		iattr_set_integer(L, "size", attr->ia_size);
+
+	if (ia_valid & ATTR_ATIME)
+		iattr_set_time(L, "atime", &attr->ia_atime);
+	if (ia_valid & ATTR_MTIME)
+		iattr_set_time(L, "mtime", &attr->ia_mtime);
+	if (ia_valid & ATTR_CTIME)
+		iattr_set_time(L, "ctime", &attr->ia_ctime);
+
+	iattr_set_flags(L, ia_valid);
+}
+
 /**
- * TODO: inode_setattr
+ * inode_setattr
  * Default: 0
  */
 LUA_LSM_INT_DEFINE3(inode_setattr, struct mnt_idmap *, idmap,
@@ -1029,7 +1125,7 @@ LUA_LSM_INT_DEFINE3(inode_setattr, struct mnt_idmap *, idmap,
 {
 	*newmntidmap(L) = idmap;
 	*newdentry(L) = dentry;
-	lua_pushnil(L);	/* TODO: attr */
+	newiattr(L, idmap, dentry, attr);
 }
 
 /**
