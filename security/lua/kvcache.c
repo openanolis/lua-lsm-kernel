@@ -450,6 +450,9 @@ void kvcache_dict_free(struct kvcache_dict *dict)
 	struct kvcache_node *node, *n;
 	struct lua_lsm_module *module;
 
+	if (atomic_read(&dict->count) == 0)
+		return;
+
 	spin_lock_bh(&nodes_gc_lock);
 	RB_FOREACH(node, kvcache, &dict->root) {
 		module = node->module;
