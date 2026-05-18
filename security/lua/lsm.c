@@ -423,6 +423,14 @@ static void lvm_vm_reset(struct lvm_state *lvm)
 	lua_gc(L, LUA_GCCOLLECT, 0);
 }
 
+static void lvm_mark_dirty(lua_State *L)
+{
+	void *ud;
+
+	lua_getallocf(L, &ud);
+	((struct lvm_state *)ud)->dirty = true;
+}
+
 static lua_State *
 lvm_get_from_task(const struct task_struct *task, bool exclusive)
 {
@@ -640,6 +648,7 @@ static int lua_modules_index(lua_State *L)
 		if (strcmp(module->name, key) != 0)
 			continue;
 
+		lvm_mark_dirty(L);
 		err = module_load(L, module);
 		if (err) {
 			__log_err("load: %s, err = %d, top = %d\n",
@@ -1344,8 +1353,11 @@ void task_blob_free(struct task_struct *task)
 	struct lvm_state *lvm = llt->lvm;
 
 	if (lvm) {
-		lua_modules_free(task, lvm->L);
-		lvm_vm_reset(lvm);
+		if (lvm->dirty) {
+			lua_modules_free(task, lvm->L);
+			lvm_vm_reset(lvm);
+			lvm->dirty = false;
+		}
 		refcount_init(&lvm->refcount, 0);
 		lvm_pool_put(lvm);
 		llt->lvm = NULL;

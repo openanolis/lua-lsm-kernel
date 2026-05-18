@@ -125,6 +125,7 @@ struct lvm_state {
 	lua_State *L;
 	atomic_t refcount;
 	struct lvm_state *next;
+	bool dirty;
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
 	atomic64_t nalloc;
 	atomic64_t nrealloc;
