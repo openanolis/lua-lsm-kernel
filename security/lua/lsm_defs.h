@@ -131,6 +131,8 @@
 		if (atomic_read(&lua_lsm_hook_stats[__LL_NR_ ## NAME].nhooks) == 0)	\
 			return ret;							\
 		L = lvm_get();								\
+		if (WARN_ON_ONCE(!L))							\
+			return -ENOMEM;							\
 		lua_pushcfunction(L, lua_traceback);					\
 		lua_pushthread(L);							\
 		lua_getfenv(L, -1);			/* save thread.fenv */		\
