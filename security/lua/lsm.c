@@ -1141,12 +1141,18 @@ static int lvm_remove_module(lua_State *L, struct lua_lsm_module *module)
 
 static int task_remove_module(struct task_struct *task, void *arg)
 {
+	struct lua_lsm_task *llt = lua_lsm_task(task);
+	struct lvm_state *lvm = llt->lvm;
 	struct lua_lsm_module *module = arg;
 	lua_State *L;
 	int err;
 
 	if (task_curr(task) && task != current)
 		return -EBUSY;
+
+	/* Unregister must not lazily create a VM for untouched tasks. */
+	if (!lvm || !smp_load_acquire(&lvm->L))
+		return -ENOENT;
 
 	L = lvm_get_from_task(task, true);
 	if (!L)
@@ -1181,10 +1187,9 @@ static int tasks_lvm_remove_module(struct lua_lsm_module *module, int *nbusy)
 			__log_info("<%s>: err = %s \t<%s>: %d-%d\n",
 				   module->name, err == -EBUSY ? "EBUSY" : "EAGAIN",
 				   task->comm, task_tgid_nr(task), task_pid_nr(task));
-		} else {
-			__log_info_ratelimited("<%s>: err = %s \t<%s>: %d-%d\n",
-					       module->name,
-					       err == -ENOENT ? "[ENOENT]" : "unknown",
+		} else if (err != -ENOENT) {
+			__log_info_ratelimited("<%s>: err = %d \t<%s>: %d-%d\n",
+					       module->name, err,
 					       task->comm, task_tgid_nr(task), task_pid_nr(task));
 		}
 	}
