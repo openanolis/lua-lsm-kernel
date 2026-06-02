@@ -53,10 +53,34 @@
 #define DECL_ARGS_5
 #define DECL_ARGS_6
 
+#define DECL_RETP_ARGS_0	int *retp
+#define DECL_RETP_ARGS_1	int *retp,
+#define DECL_RETP_ARGS_2	int *retp,
+#define DECL_RETP_ARGS_3	int *retp,
+#define DECL_RETP_ARGS_4	int *retp,
+#define DECL_RETP_ARGS_5	int *retp,
+#define DECL_RETP_ARGS_6	int *retp,
+
+#define CALL_RETP_ARGS_0	(&ret)
+#define CALL_RETP_ARGS_1	(&ret),
+#define CALL_RETP_ARGS_2	(&ret),
+#define CALL_RETP_ARGS_3	(&ret),
+#define CALL_RETP_ARGS_4	(&ret),
+#define CALL_RETP_ARGS_5	(&ret),
+#define CALL_RETP_ARGS_6	(&ret),
+
 #define ASSIGN_FROM_FUNC_void(ret)
 #define ASSIGN_FROM_FUNC_int(ret)	ret =
 
 #define PCALL_RES_void(L, top, ret)	do {} while (0)
+
+static inline void lua_lsm_pcall_res_errno(lua_State *L, int idx, int *retp)
+{
+	int errnum = lua_tointeger(L, idx);
+
+	if (errnum > 0 && errnum <= MAX_ERRNO)
+		*retp = -errnum;
+}
 
 /*
  * hooks result format:
@@ -67,30 +91,71 @@
  *   false, errno : -errno
  *   nil, errno   : -errno
  */
-#define PCALL_RES_int(L, top, ret)							\
-	do {										\
-		/* stack: [..., _M, res1, ...] */					\
-		int nres = lua_gettop(L) - top + 1;					\
-		switch (nres) {								\
-		case 0:									\
-			break;								\
-		case 1:									\
-			if (lua_type(L, top) == LUA_TBOOLEAN)				\
-				ret = lua_toboolean(L, top) ? 0 : -EPERM;		\
-			break;								\
-		default:								\
-			if (!lua_toboolean(L, top)) {					\
-				int errno = lua_tointeger(L, top + 1);			\
-				if (errno > 0 && errno <= MAX_ERRNO)			\
-					ret = -errno;					\
-			}								\
-			break;								\
-		}									\
-		lua_pop(L, nres);							\
-	} while (0)
+static inline void lua_lsm_pcall_res_int(lua_State *L, int top, int *retp)
+{
+	int nres = lua_gettop(L) - top + 1;
+
+	/* stack: [..., _M, res1, ...] */
+	switch (nres) {
+	case 0:
+		break;
+	case 1:
+		if (lua_type(L, top) == LUA_TBOOLEAN)
+			*retp = lua_toboolean(L, top) ? 0 : -EPERM;
+		break;
+	default:
+		if (!lua_toboolean(L, top))
+			lua_lsm_pcall_res_errno(L, top + 1, retp);
+		break;
+	}
+	lua_pop(L, nres);
+}
+
+static inline void lua_lsm_pcall_res_bool(lua_State *L, int top, int *retp)
+{
+	int nres = lua_gettop(L) - top + 1;
+
+	if (nres > 0 && lua_type(L, top) == LUA_TBOOLEAN)
+		*retp = lua_toboolean(L, top) ? 1 : 0;
+	lua_pop(L, nres);
+}
+
+static inline void lua_lsm_pcall_res_boolerr(lua_State *L, int top, int *retp)
+{
+	int nres = lua_gettop(L) - top + 1;
+	int tt;
+
+	switch (nres) {
+	case 0:
+		break;
+	case 1:
+		tt = lua_type(L, top);
+		if (tt == LUA_TBOOLEAN)
+			*retp = lua_toboolean(L, top) ? 1 : 0;
+		break;
+	default:
+		tt = lua_type(L, top);
+		if (tt == LUA_TBOOLEAN) {
+			if (lua_toboolean(L, top))
+				*retp = 1;
+			else
+				lua_lsm_pcall_res_errno(L, top + 1, retp);
+		} else if (tt == LUA_TNIL) {
+			lua_lsm_pcall_res_errno(L, top + 1, retp);
+		}
+		break;
+	}
+	lua_pop(L, nres);
+}
+
+#define PCALL_RES_int(L, top, ret)	lua_lsm_pcall_res_int(L, top, &(ret))
+#define PCALL_RES_bool(L, top, ret)	lua_lsm_pcall_res_bool(L, top, &(ret))
+#define PCALL_RES_boolerr(L, top, ret)	lua_lsm_pcall_res_boolerr(L, top, &(ret))
 
 #define LCALL_NRES_void		0
 #define LCALL_NRES_int		LUA_MULTRET
+#define LCALL_NRES_bool		LUA_MULTRET
+#define LCALL_NRES_boolerr	LUA_MULTRET
 
 #define LUA_PCALL(rettype, L, top, ret)							\
 	do {										\
@@ -115,21 +180,38 @@
 #define RET_CHECK_void(NAME, ret)	do {} while (0)
 
 #define RET_CHECK_int(NAME, ret)							\
-	if ((ret) && (ret) != LSM_RET_DEFAULT(NAME))					\
+	if ((ret) != LSM_RET_DEFAULT(NAME))						\
 		break
 
+#define RET_CHECK_bool(NAME, ret)	RET_CHECK_int(NAME, ret)
+#define RET_CHECK_boolerr(NAME, ret)	RET_CHECK_int(NAME, ret)
 
-#define LUA_LSM_DEFINEx(x, NAME, rettype, vmtype, ...)					\
+static inline int lua_lsm_dispatch_failret_default(int default_ret)
+{
+	return default_ret;
+}
+
+static inline int lua_lsm_dispatch_failret_errno(int default_ret __maybe_unused)
+{
+	return -ENOMEM;
+}
+
+#define LUA_LSM_DISPATCH_FAILRET_DEFAULT(NAME)			\
+	lua_lsm_dispatch_failret_default(LSM_RET_DEFAULT(NAME))
+#define LUA_LSM_DISPATCH_FAILRET_ERRNO(NAME)			\
+	lua_lsm_dispatch_failret_errno(LSM_RET_DEFAULT(NAME))
+
+#define LUA_LSM_DEFINEx(x, NAME, rettype, vmtype, pcalltype, failret, ...)		\
 	static inline vmtype __lua_lsm_vm_ ## NAME(lua_State *L	__VA_OPT__(,)		\
 					__MAP(x, __SC_DECL, __VA_ARGS__));		\
-	static inline int __lua_lsm_ ## NAME(DECL_ARGS_ ## x				\
+	static inline int __lua_lsm_ ## NAME(DECL_RETP_ARGS_ ## x		\
 					__MAP(x, __SC_DECL, __VA_ARGS__))		\
 	{										\
 		struct lua_lsm_module *module;						\
 		lua_State *L;								\
 		int ret = LSM_RET_DEFAULT(NAME);					\
 		if (atomic_read(&lua_lsm_hook_stats[__LL_NR_ ## NAME].nhooks) == 0)	\
-			return ret;							\
+			goto out;							\
 		L = lvm_get();								\
 		if (WARN_ON_ONCE(!L))							\
 			return -ENOMEM;							\
@@ -157,18 +239,20 @@
 				ASSIGN_FROM_FUNC_ ## vmtype(ret)			\
 					__lua_lsm_vm_ ## NAME(L __VA_OPT__(,)		\
 						__MAP(x, __SC_ARGS, __VA_ARGS__));	\
-				END_VM_CALL_ ## vmtype(rettype, L, top, ret);		\
+				END_VM_CALL_ ## vmtype(pcalltype, L, top, ret);		\
 			} else {							\
 				lua_pop(L, 1);		/* pop lfunc */			\
 			}								\
 			lua_pop(L, 1);			/* pop _M */			\
-			RET_CHECK_ ## rettype(NAME, ret);				\
+			RET_CHECK_ ## pcalltype(NAME, ret);				\
 		}									\
 		lua_pushnil(L);								\
 		lua_setfield(L, LUA_REGISTRYINDEX, CURR_ENV);				\
 		lua_pop(L, 4);								\
 		lvm_put(L);								\
-		return ret;								\
+out:											\
+		*retp = ret;								\
+		return 0;								\
 	}										\
 	rettype lua_lsm_ ## NAME(DECL_ARGS_ ## x					\
 				__MAP(x, __SC_DECL, __VA_ARGS__))			\
@@ -179,10 +263,14 @@
 		ret = __prepare_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));		\
 		if (ret >= 0) {								\
 			int idx = srcu_read_lock(&modules_ss);				\
-			if (static_branch_unlikely(&lua_lsm_modules_active))		\
-				ret = __lua_lsm_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));\
-			else								\
+			if (static_branch_unlikely(&lua_lsm_modules_active)) {		\
+				int err = __lua_lsm_ ## NAME(CALL_RETP_ARGS_ ## x	\
+					__MAP(x, __SC_ARGS, __VA_ARGS__));		\
+				if (err)						\
+					ret = LUA_LSM_DISPATCH_FAILRET_ ## failret(NAME);\
+			} else {							\
 				ret = LSM_RET_DEFAULT(NAME);				\
+			}								\
 			__postpone_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));		\
 			srcu_read_unlock(&modules_ss, idx);				\
 		}									\
@@ -194,37 +282,95 @@
 
 /*****************************************************************************/
 
-#define LUA_LSM_VOID_DEFINE0(name, ...)		LUA_LSM_DEFINEx(0, name, void, void, ##__VA_ARGS__)
-#define LUA_LSM_VOID_DEFINE1(name, ...)		LUA_LSM_DEFINEx(1, name, void, void, ##__VA_ARGS__)
-#define LUA_LSM_VOID_DEFINE2(name, ...)		LUA_LSM_DEFINEx(2, name, void, void, ##__VA_ARGS__)
-#define LUA_LSM_VOID_DEFINE3(name, ...)		LUA_LSM_DEFINEx(3, name, void, void, ##__VA_ARGS__)
-#define LUA_LSM_VOID_DEFINE4(name, ...)		LUA_LSM_DEFINEx(4, name, void, void, ##__VA_ARGS__)
-#define LUA_LSM_VOID_DEFINE5(name, ...)		LUA_LSM_DEFINEx(5, name, void, void, ##__VA_ARGS__)
-#define LUA_LSM_VOID_DEFINE6(name, ...)		LUA_LSM_DEFINEx(6, name, void, void, ##__VA_ARGS__)
+#define LUA_LSM_VOID_DEFINE0(name, ...)					\
+	LUA_LSM_DEFINEx(0, name, void, void, void, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_VOID_DEFINE1(name, ...)					\
+	LUA_LSM_DEFINEx(1, name, void, void, void, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_VOID_DEFINE2(name, ...)					\
+	LUA_LSM_DEFINEx(2, name, void, void, void, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_VOID_DEFINE3(name, ...)					\
+	LUA_LSM_DEFINEx(3, name, void, void, void, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_VOID_DEFINE4(name, ...)					\
+	LUA_LSM_DEFINEx(4, name, void, void, void, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_VOID_DEFINE5(name, ...)					\
+	LUA_LSM_DEFINEx(5, name, void, void, void, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_VOID_DEFINE6(name, ...)					\
+	LUA_LSM_DEFINEx(6, name, void, void, void, DEFAULT, ##__VA_ARGS__)
 
-#define LUA_LSM_VOID_NAKED_DEFINE0(name, ...)	LUA_LSM_DEFINEx(0, name, void, int, ##__VA_ARGS__)
-#define LUA_LSM_VOID_NAKED_DEFINE1(name, ...)	LUA_LSM_DEFINEx(1, name, void, int, ##__VA_ARGS__)
-#define LUA_LSM_VOID_NAKED_DEFINE2(name, ...)	LUA_LSM_DEFINEx(2, name, void, int, ##__VA_ARGS__)
-#define LUA_LSM_VOID_NAKED_DEFINE3(name, ...)	LUA_LSM_DEFINEx(3, name, void, int, ##__VA_ARGS__)
-#define LUA_LSM_VOID_NAKED_DEFINE4(name, ...)	LUA_LSM_DEFINEx(4, name, void, int, ##__VA_ARGS__)
-#define LUA_LSM_VOID_NAKED_DEFINE5(name, ...)	LUA_LSM_DEFINEx(5, name, void, int, ##__VA_ARGS__)
-#define LUA_LSM_VOID_NAKED_DEFINE6(name, ...)	LUA_LSM_DEFINEx(6, name, void, int, ##__VA_ARGS__)
+#define LUA_LSM_VOID_NAKED_DEFINE0(name, ...)				\
+	LUA_LSM_DEFINEx(0, name, void, int, int, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_VOID_NAKED_DEFINE1(name, ...)				\
+	LUA_LSM_DEFINEx(1, name, void, int, int, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_VOID_NAKED_DEFINE2(name, ...)				\
+	LUA_LSM_DEFINEx(2, name, void, int, int, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_VOID_NAKED_DEFINE3(name, ...)				\
+	LUA_LSM_DEFINEx(3, name, void, int, int, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_VOID_NAKED_DEFINE4(name, ...)				\
+	LUA_LSM_DEFINEx(4, name, void, int, int, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_VOID_NAKED_DEFINE5(name, ...)				\
+	LUA_LSM_DEFINEx(5, name, void, int, int, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_VOID_NAKED_DEFINE6(name, ...)				\
+	LUA_LSM_DEFINEx(6, name, void, int, int, DEFAULT, ##__VA_ARGS__)
 
-#define LUA_LSM_INT_DEFINE0(name, ...)		LUA_LSM_DEFINEx(0, name, int, void, ##__VA_ARGS__)
-#define LUA_LSM_INT_DEFINE1(name, ...)		LUA_LSM_DEFINEx(1, name, int, void, ##__VA_ARGS__)
-#define LUA_LSM_INT_DEFINE2(name, ...)		LUA_LSM_DEFINEx(2, name, int, void, ##__VA_ARGS__)
-#define LUA_LSM_INT_DEFINE3(name, ...)		LUA_LSM_DEFINEx(3, name, int, void, ##__VA_ARGS__)
-#define LUA_LSM_INT_DEFINE4(name, ...)		LUA_LSM_DEFINEx(4, name, int, void, ##__VA_ARGS__)
-#define LUA_LSM_INT_DEFINE5(name, ...)		LUA_LSM_DEFINEx(5, name, int, void, ##__VA_ARGS__)
-#define LUA_LSM_INT_DEFINE6(name, ...)		LUA_LSM_DEFINEx(6, name, int, void, ##__VA_ARGS__)
+#define LUA_LSM_INT_DEFINE0(name, ...)					\
+	LUA_LSM_DEFINEx(0, name, int, void, int, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_DEFINE1(name, ...)					\
+	LUA_LSM_DEFINEx(1, name, int, void, int, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_DEFINE2(name, ...)					\
+	LUA_LSM_DEFINEx(2, name, int, void, int, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_DEFINE3(name, ...)					\
+	LUA_LSM_DEFINEx(3, name, int, void, int, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_DEFINE4(name, ...)					\
+	LUA_LSM_DEFINEx(4, name, int, void, int, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_DEFINE5(name, ...)					\
+	LUA_LSM_DEFINEx(5, name, int, void, int, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_DEFINE6(name, ...)					\
+	LUA_LSM_DEFINEx(6, name, int, void, int, ERRNO, ##__VA_ARGS__)
 
-#define LUA_LSM_INT_NAKED_DEFINE0(name, ...)	LUA_LSM_DEFINEx(0, name, int, int, ##__VA_ARGS__)
-#define LUA_LSM_INT_NAKED_DEFINE1(name, ...)	LUA_LSM_DEFINEx(1, name, int, int, ##__VA_ARGS__)
-#define LUA_LSM_INT_NAKED_DEFINE2(name, ...)	LUA_LSM_DEFINEx(2, name, int, int, ##__VA_ARGS__)
-#define LUA_LSM_INT_NAKED_DEFINE3(name, ...)	LUA_LSM_DEFINEx(3, name, int, int, ##__VA_ARGS__)
-#define LUA_LSM_INT_NAKED_DEFINE4(name, ...)	LUA_LSM_DEFINEx(4, name, int, int, ##__VA_ARGS__)
-#define LUA_LSM_INT_NAKED_DEFINE5(name, ...)	LUA_LSM_DEFINEx(5, name, int, int, ##__VA_ARGS__)
-#define LUA_LSM_INT_NAKED_DEFINE6(name, ...)	LUA_LSM_DEFINEx(6, name, int, int, ##__VA_ARGS__)
+#define LUA_LSM_INT_BOOL_DEFINE0(name, ...)				\
+	LUA_LSM_DEFINEx(0, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_INT_BOOL_DEFINE1(name, ...)				\
+	LUA_LSM_DEFINEx(1, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_INT_BOOL_DEFINE2(name, ...)				\
+	LUA_LSM_DEFINEx(2, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_INT_BOOL_DEFINE3(name, ...)				\
+	LUA_LSM_DEFINEx(3, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_INT_BOOL_DEFINE4(name, ...)				\
+	LUA_LSM_DEFINEx(4, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_INT_BOOL_DEFINE5(name, ...)				\
+	LUA_LSM_DEFINEx(5, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+#define LUA_LSM_INT_BOOL_DEFINE6(name, ...)				\
+	LUA_LSM_DEFINEx(6, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+
+#define LUA_LSM_INT_BOOLERR_DEFINE0(name, ...)				\
+	LUA_LSM_DEFINEx(0, name, int, void, boolerr, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_BOOLERR_DEFINE1(name, ...)				\
+	LUA_LSM_DEFINEx(1, name, int, void, boolerr, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_BOOLERR_DEFINE2(name, ...)				\
+	LUA_LSM_DEFINEx(2, name, int, void, boolerr, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_BOOLERR_DEFINE3(name, ...)				\
+	LUA_LSM_DEFINEx(3, name, int, void, boolerr, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_BOOLERR_DEFINE4(name, ...)				\
+	LUA_LSM_DEFINEx(4, name, int, void, boolerr, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_BOOLERR_DEFINE5(name, ...)				\
+	LUA_LSM_DEFINEx(5, name, int, void, boolerr, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_BOOLERR_DEFINE6(name, ...)				\
+	LUA_LSM_DEFINEx(6, name, int, void, boolerr, ERRNO, ##__VA_ARGS__)
+
+#define LUA_LSM_INT_NAKED_DEFINE0(name, ...)				\
+	LUA_LSM_DEFINEx(0, name, int, int, int, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_NAKED_DEFINE1(name, ...)				\
+	LUA_LSM_DEFINEx(1, name, int, int, int, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_NAKED_DEFINE2(name, ...)				\
+	LUA_LSM_DEFINEx(2, name, int, int, int, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_NAKED_DEFINE3(name, ...)				\
+	LUA_LSM_DEFINEx(3, name, int, int, int, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_NAKED_DEFINE4(name, ...)				\
+	LUA_LSM_DEFINEx(4, name, int, int, int, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_NAKED_DEFINE5(name, ...)				\
+	LUA_LSM_DEFINEx(5, name, int, int, int, ERRNO, ##__VA_ARGS__)
+#define LUA_LSM_INT_NAKED_DEFINE6(name, ...)				\
+	LUA_LSM_DEFINEx(6, name, int, int, int, ERRNO, ##__VA_ARGS__)
 
 
 /* prepare and postpone function macro */
