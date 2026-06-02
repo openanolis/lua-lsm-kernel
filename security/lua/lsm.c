@@ -51,6 +51,8 @@ struct list_head lsm_modules = LIST_HEAD_INIT(lsm_modules);
 static DEFINE_MUTEX(modules_mutex);
 DEFINE_SRCU(modules_ss);
 
+DEFINE_STATIC_KEY_FALSE(lua_lsm_modules_active);
+
 struct lua_lsm_hook_stat lua_lsm_hook_stats[] = {
 	#define LSM_HOOK(RET, DEFAULT, NAME, ...)			\
 		{ .name = #NAME, .nhooks = ATOMIC_INIT(0), },
@@ -1033,6 +1035,7 @@ int lua_lsm_module_register(const char *code, size_t len)
 
 		module->state = LMS_STATE_LIVE;
 		list_add_tail_rcu(&module->list, &lsm_modules);
+		static_branch_inc(&lua_lsm_modules_active);
 	}
 	mutex_unlock(&modules_mutex);
 
@@ -1182,6 +1185,7 @@ int lua_lsm_module_unregister(const char *name)
 	}
 	if (found && module->state == LMS_STATE_LIVE) {
 		module->state = LMS_STATE_GOING;
+		static_branch_dec(&lua_lsm_modules_active);
 
 		for (i = 0; lua_lsm_hook_stats[i].name; i++) {
 			if (__BITMAP_ISSET(i, &module->hookfuncs))

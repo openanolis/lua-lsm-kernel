@@ -17,9 +17,12 @@
 #include <linux/spinlock.h>
 #include <linux/perf_event.h>
 #include <linux/u64_stats_sync.h>
+#include <linux/jump_label.h>
 #include <linux/lua.h>
 #include "bitmap.h"
 #include "kvcache.h"
+
+DECLARE_STATIC_KEY_FALSE(lua_lsm_modules_active);
 
 /* Flag indicating whether initialization completed */
 extern int lua_lsm_initialized __initdata;

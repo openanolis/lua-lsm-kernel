@@ -171,17 +171,19 @@
 	rettype lua_lsm_ ## NAME(DECL_ARGS_ ## x					\
 				__MAP(x, __SC_DECL, __VA_ARGS__))			\
 	{										\
-		int idx;								\
 		int ret;								\
 		DECLARE_STATS_VARS();							\
 		START_STATS(NAME);							\
-		idx = srcu_read_lock(&modules_ss);					\
 		ret = __prepare_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));		\
 		if (ret >= 0) {								\
-			ret = __lua_lsm_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));	\
+			int idx = srcu_read_lock(&modules_ss);				\
+			if (static_branch_unlikely(&lua_lsm_modules_active))		\
+				ret = __lua_lsm_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));\
+			else								\
+				ret = LSM_RET_DEFAULT(NAME);				\
 			__postpone_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));		\
+			srcu_read_unlock(&modules_ss, idx);				\
 		}									\
-		srcu_read_unlock(&modules_ss, idx);					\
 		END_STATS(NAME);							\
 		return (rettype)ret;							\
 	}										\
