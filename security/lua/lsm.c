@@ -436,16 +436,26 @@ static void lvm_mark_dirty(lua_State *L)
 }
 
 static lua_State *
-lvm_get_from_task(const struct task_struct *task, bool exclusive)
+lvm_get_from_task(const struct task_struct *task, bool require_idle)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
 	struct lvm_state *lvm = llt->lvm;
 	lua_State *L;
 	int n;
 
-	/* Pairs with cmpxchg_release() that publishes a built lua_State. */
+	n = refcount_acquire(&lvm->refcount);
+	if (require_idle && n != 1) {
+		refcount_release(&lvm->refcount);
+		return NULL;
+	}
+	if (!require_idle) {
+		WARN_ON(n != 1);
+		KASSERT(n == 1, ("<%s> Lua VM is reused, refcount = %d\n",
+				 task->comm, n));
+	}
+
 	L = smp_load_acquire(&lvm->L);
-	if (unlikely(!L)) {
+	if (!L) {
 		struct lvm_state *pooled = lvm_pool_get();
 		struct lvm_state build_owner;
 		struct lvm_state *owner;
@@ -459,40 +469,29 @@ lvm_get_from_task(const struct task_struct *task, bool exclusive)
 			memset(&build_owner, 0, sizeof(build_owner));
 			built = lvm_build_lua_state(&build_owner);
 			if (!built)
-				return NULL;
+				goto err_put;
 			owner = &build_owner;
 		}
-		if (cmpxchg_release(&lvm->L, NULL, built) != NULL) {
-			lua_close(built);
-			lvm_stats_vmfree();
-			kfree(pooled);
-		} else {
-			lua_setallocf(built, lvm_alloc, lvm);
+		lua_setallocf(built, lvm_alloc, lvm);
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
-			atomic64_set(&lvm->nalloc,
-				atomic64_read(&owner->nalloc));
-			atomic64_set(&lvm->nrealloc,
-				atomic64_read(&owner->nrealloc));
-			atomic64_set(&lvm->nfree,
-				atomic64_read(&owner->nfree));
+		atomic64_set(&lvm->nalloc, atomic64_read(&owner->nalloc));
+		atomic64_set(&lvm->nrealloc,
+			     atomic64_read(&owner->nrealloc));
+		atomic64_set(&lvm->nfree, atomic64_read(&owner->nfree));
 #endif
-			kfree(pooled);
-		}
-		/* Pairs with cmpxchg_release() above. */
-		L = smp_load_acquire(&lvm->L);
-		if (WARN_ON_ONCE(!L))
-			return NULL;
+		kfree(pooled);
+		/*
+		 * Readers treat non-NULL lvm->L as a ready VM, so publish it
+		 * only after the allocator owner has moved to the task lvm.
+		 */
+		smp_store_release(&lvm->L, built);
+		L = built;
 	}
-
-	n = refcount_acquire(&lvm->refcount);
-	if (exclusive && n != 1) {
-		refcount_release(&lvm->refcount);
-		return NULL;
-	}
-	WARN_ON(n != 1);
-	KASSERT(n == 1, ("<%s> Lua VM is reused, refcount = %d\n",
-			 task->comm, n));
 	return L;
+
+err_put:
+	refcount_release(&lvm->refcount);
+	return NULL;
 }
 
 static void lvm_put_to_task(const struct task_struct *task, lua_State *L)
