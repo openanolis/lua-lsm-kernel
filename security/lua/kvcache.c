@@ -6,6 +6,7 @@
  */
 
 #include "debug.h"
+#include <linux/bottom_half.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/errname.h>
@@ -88,23 +89,38 @@ static int kvcache_dict_init_once(struct kvcache_dict *dict)
 	int state;
 
 	for (;;) {
+		local_bh_disable();
 		state = atomic_read_acquire(&dict->state);
 		if (likely(state == KVCACHE_DICT_READY))
-			return 0;
+			goto out_bh;
 		if (state == KVCACHE_DICT_INITING) {
+			local_bh_enable();
 			cpu_relax();
 			continue;
 		}
-		if (WARN_ON_ONCE(state != KVCACHE_DICT_UNINIT))
+		if (WARN_ON_ONCE(state != KVCACHE_DICT_UNINIT)) {
+			local_bh_enable();
 			return -EINVAL;
+		}
 
+		/*
+		 * Readers busy-wait while the dictionary is INITING. Keep the
+		 * UNINIT->READY transition within a softirq-disabled window so a
+		 * same-CPU softirq cannot observe INITING and spin before the
+		 * initializer publishes READY.
+		 */
 		if (atomic_try_cmpxchg(&dict->state, &state,
 				       KVCACHE_DICT_INITING)) {
 			__kvcache_dict_init(dict);
 			atomic_set_release(&dict->state, KVCACHE_DICT_READY);
-			return 0;
+			goto out_bh;
 		}
+		local_bh_enable();
 	}
+
+out_bh:
+	local_bh_enable();
+	return 0;
 }
 
 static int kvcache_result(lua_State *L, int err)

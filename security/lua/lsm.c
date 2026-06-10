@@ -52,7 +52,7 @@ static DEFINE_MUTEX(modules_mutex);
 DEFINE_SRCU(modules_ss);
 
 DEFINE_STATIC_KEY_FALSE(lua_lsm_modules_active);
-DEFINE_STATIC_KEY_FALSE(lua_lsm_inactive_cleanup_possible);
+DEFINE_STATIC_KEY_FALSE(lua_lsm_inactive_cleanup_armed);
 
 struct lua_lsm_hook_stat lua_lsm_hook_stats[] = {
 	#define LSM_HOOK(RET, DEFAULT, NAME, ...)			\
@@ -1140,7 +1140,11 @@ int lua_lsm_module_register(const char *code, size_t len)
 
 		module->state = LMS_STATE_LIVE;
 		list_add_tail_rcu(&module->list, &lsm_modules);
-		static_branch_enable(&lua_lsm_inactive_cleanup_possible);
+		/*
+		 * Once any Lua policy has been loaded, inactive free-hook cleanup
+		 * must stay armed for objects that outlive later module unload.
+		 */
+		static_branch_enable(&lua_lsm_inactive_cleanup_armed);
 		static_branch_inc(&lua_lsm_modules_active);
 	}
 	mutex_unlock(&modules_mutex);

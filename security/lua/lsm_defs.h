@@ -231,7 +231,7 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 
 #define LUA_LSM_INACTIVE_CLEANUP(x, NAME, ...)						\
 	do {										\
-		if (static_branch_unlikely(&lua_lsm_inactive_cleanup_possible) &&	\
+		if (static_branch_unlikely(&lua_lsm_inactive_cleanup_armed) &&	\
 		    lua_lsm_hook_has_inactive_cleanup(__LL_NR_ ## NAME)) {		\
 			int idx = srcu_read_lock(&modules_ss);				\
 			__postpone_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));		\
