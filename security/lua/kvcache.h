@@ -9,6 +9,7 @@
 #define _SECURITY_LUA_LSM_KVCACHE_H
 
 #include <linux/list.h>
+#include <linux/atomic.h>
 #include <linux/rwlock.h>
 #include <linux/seq_file.h>
 #include <linux/lua.h>
@@ -17,6 +18,12 @@
 #include "tree.h"
 
 #define CACHE_CAPACITY	1024
+
+enum kvcache_dict_state {
+	KVCACHE_DICT_UNINIT,
+	KVCACHE_DICT_INITING,
+	KVCACHE_DICT_READY,
+};
 
 struct lua_lsm_module;
 
@@ -37,6 +44,7 @@ struct kvcache_node {
 };
 
 struct kvcache_dict {
+	atomic_t state;
 	int capacity;
 	atomic_t count;
 	rwlock_t lock;
