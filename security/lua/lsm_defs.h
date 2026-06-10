@@ -213,8 +213,11 @@ static inline int lua_lsm_dispatch_failret_errno(int default_ret __maybe_unused)
 		if (atomic_read(&lua_lsm_hook_stats[__LL_NR_ ## NAME].nhooks) == 0)	\
 			goto out;							\
 		L = lvm_get();								\
-		if (WARN_ON_ONCE(!L))							\
+		if (!L) {								\
+			if (lvm_current_task_teardown())				\
+				goto out;						\
 			return -ENOMEM;							\
+		}									\
 		lua_pushcfunction(L, lua_traceback);					\
 		lua_pushthread(L);							\
 		lua_getfenv(L, -1);			/* save thread.fenv */		\

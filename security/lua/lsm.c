@@ -435,15 +435,66 @@ static void lvm_mark_dirty(lua_State *L)
 	((struct lvm_state *)ud)->dirty = true;
 }
 
+static bool lvm_task_teardown(const struct lua_lsm_task *llt)
+{
+	/* Pairs with smp_store_release() in task_blob_free(). */
+	return smp_load_acquire(&llt->lvm_teardown);
+}
+
+bool lvm_current_task_teardown(void)
+{
+	return in_task() && lvm_task_teardown(lua_lsm_task(current));
+}
+
+static struct lvm_state *
+lvm_get_task_state(const struct task_struct *task, bool create)
+{
+	struct lua_lsm_task *llt = lua_lsm_task(task);
+	struct lvm_state *lvm, *old;
+
+	if (unlikely(lvm_task_teardown(llt)))
+		return NULL;
+
+	/* Pairs with cmpxchg() publishing a lazy task VM state. */
+	lvm = smp_load_acquire(&llt->lvm);
+	if (likely(lvm || !create))
+		return lvm;
+
+	lvm = kzalloc(sizeof(*lvm), lua_lsm_gfp());
+	if (!lvm)
+		return NULL;
+
+	if (unlikely(lvm_task_teardown(llt))) {
+		kfree(lvm);
+		return NULL;
+	}
+
+	old = cmpxchg(&llt->lvm, NULL, lvm);
+	if (old) {
+		kfree(lvm);
+		lvm = old;
+	}
+
+	if (unlikely(lvm_task_teardown(llt)))
+		return NULL;
+
+	return lvm;
+}
+
 static lua_State *
 lvm_get_from_task(const struct task_struct *task, bool require_idle)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	struct lvm_state *lvm = llt->lvm;
+	struct lvm_state *lvm = lvm_get_task_state(task, !require_idle);
 	lua_State *L;
 	int n;
 
+	if (!lvm)
+		return NULL;
+
 	n = refcount_acquire(&lvm->refcount);
+	if (unlikely(lvm_task_teardown(llt)))
+		goto err_put;
 	if (require_idle && n != 1) {
 		refcount_release(&lvm->refcount);
 		return NULL;
@@ -497,7 +548,7 @@ err_put:
 static void lvm_put_to_task(const struct task_struct *task, lua_State *L)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	struct lvm_state *lvm = llt->lvm;
+	struct lvm_state *lvm = READ_ONCE(llt->lvm);
 	int n = refcount_release(&lvm->refcount);
 
 	KASSERT(n == 0, ("<%s> Lua VM is reused, refcount = %d\n",
@@ -1141,8 +1192,8 @@ static int lvm_remove_module(lua_State *L, struct lua_lsm_module *module)
 static int task_remove_module(struct task_struct *task, void *arg)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	struct lvm_state *lvm = llt->lvm;
 	struct lua_lsm_module *module = arg;
+	struct lvm_state *lvm;
 	lua_State *L;
 	int err;
 
@@ -1150,6 +1201,8 @@ static int task_remove_module(struct task_struct *task, void *arg)
 		return -EBUSY;
 
 	/* Unregister must not lazily create a VM for untouched tasks. */
+	/* Pairs with cmpxchg() in lvm_get_task_state(). */
+	lvm = smp_load_acquire(&llt->lvm);
 	if (!lvm || !smp_load_acquire(&lvm->L))
 		return -ENOENT;
 
@@ -1381,36 +1434,39 @@ int modules_show(struct seq_file *m, void *v)
 int task_blob_init(struct task_struct *task)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	struct lvm_state *lvm;
 
+	WRITE_ONCE(llt->lvm_teardown, false);
 	kvcache_dict_init(&llt->dict);
-
-	lvm = kzalloc(sizeof(*lvm), GFP_KERNEL);
-	if (!lvm)
-		return -ENOMEM;
-
-	llt->lvm = lvm;
 	return 0;
 }
 
 void task_blob_free(struct task_struct *task)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	struct lvm_state *lvm = llt->lvm;
+	struct lvm_state *lvm;
 
+	/*
+	 * Lua GC can run finalizers which re-enter LSM hooks. Keep the task VM
+	 * published until reset completes, but make lvm_get() skip this task so
+	 * re-entrant hooks cannot allocate or reuse a VM during teardown.
+	 */
+	smp_store_release(&llt->lvm_teardown, true);
+	/* Pairs with cmpxchg() in lvm_get_task_state(). */
+	lvm = smp_load_acquire(&llt->lvm);
+	if (lvm && READ_ONCE(lvm->L) && lvm->dirty) {
+		lua_modules_free(task, lvm->L);
+		lvm_vm_reset(lvm);
+		lvm->dirty = false;
+	}
+
+	lvm = xchg(&llt->lvm, NULL);
 	if (lvm) {
 		if (!READ_ONCE(lvm->L)) {
 			kfree(lvm);
 		} else {
-			if (lvm->dirty) {
-				lua_modules_free(task, lvm->L);
-				lvm_vm_reset(lvm);
-				lvm->dirty = false;
-			}
 			refcount_init(&lvm->refcount, 0);
 			lvm_pool_put(lvm);
 		}
-		llt->lvm = NULL;
 	}
 	kvcache_dict_free(&llt->dict);
 }

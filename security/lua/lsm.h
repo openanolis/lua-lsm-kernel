@@ -113,6 +113,7 @@ extern struct srcu_struct modules_ss;
 
 lua_State *lvm_get(void);
 void lvm_put(lua_State *L);
+bool lvm_current_task_teardown(void);
 
 int lua_lsm_module_register(const char *code, size_t len);
 int lua_lsm_module_unregister(const char *name);
@@ -141,6 +142,7 @@ struct lvm_state {
 
 struct lua_lsm_task {
 	struct lvm_state *lvm;
+	bool lvm_teardown;
 	struct kvcache_dict dict;
 };
 
