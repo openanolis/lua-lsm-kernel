@@ -23,6 +23,7 @@
 #include "kvcache.h"
 
 DECLARE_STATIC_KEY_FALSE(lua_lsm_modules_active);
+DECLARE_STATIC_KEY_FALSE(lua_lsm_inactive_cleanup_possible);
 
 /* Flag indicating whether initialization completed */
 extern int lua_lsm_initialized __initdata;
