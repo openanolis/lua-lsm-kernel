@@ -201,16 +201,53 @@ static inline int lua_lsm_dispatch_failret_errno(int default_ret __maybe_unused)
 #define LUA_LSM_DISPATCH_FAILRET_ERRNO(NAME)			\
 	lua_lsm_dispatch_failret_errno(LSM_RET_DEFAULT(NAME))
 
+static inline bool lua_lsm_hook_active(unsigned int nr)
+{
+	return static_branch_unlikely(&lua_lsm_modules_active) &&
+	       atomic_read(&lua_lsm_hook_stats[nr].nhooks) != 0;
+}
+
+static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
+{
+	switch (nr) {
+	case __LL_NR_sb_free_security:
+	case __LL_NR_inode_free_security_rcu:
+	case __LL_NR_file_free_security:
+	case __LL_NR_task_free:
+	case __LL_NR_cred_free:
+	case __LL_NR_msg_msg_free_security:
+	case __LL_NR_msg_queue_free_security:
+	case __LL_NR_shm_free_security:
+	case __LL_NR_sem_free_security:
+#ifdef CONFIG_SECURITY_NETWORK
+	case __LL_NR_sk_free_security:
+#endif
+	case __LL_NR_bdev_free_security:
+		return true;
+	default:
+		return false;
+	}
+}
+
+#define LUA_LSM_INACTIVE_CLEANUP(x, NAME, ...)						\
+	do {										\
+		if (lua_lsm_hook_has_inactive_cleanup(__LL_NR_ ## NAME)) {		\
+			int idx = srcu_read_lock(&modules_ss);				\
+			__postpone_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));		\
+			srcu_read_unlock(&modules_ss, idx);				\
+		}									\
+	} while (0)
+
 #define LUA_LSM_DEFINEx(x, NAME, rettype, vmtype, pcalltype, failret, ...)		\
 	static inline vmtype __lua_lsm_vm_ ## NAME(lua_State *L	__VA_OPT__(,)		\
 					__MAP(x, __SC_DECL, __VA_ARGS__));		\
-	static inline int __lua_lsm_ ## NAME(DECL_RETP_ARGS_ ## x		\
+	static inline int __lua_lsm_ ## NAME(DECL_RETP_ARGS_ ## x			\
 					__MAP(x, __SC_DECL, __VA_ARGS__))		\
 	{										\
 		struct lua_lsm_module *module;						\
 		lua_State *L;								\
 		int ret = LSM_RET_DEFAULT(NAME);					\
-		if (atomic_read(&lua_lsm_hook_stats[__LL_NR_ ## NAME].nhooks) == 0)	\
+		if (!lua_lsm_hook_active(__LL_NR_ ## NAME))				\
 			goto out;							\
 		L = lvm_get();								\
 		if (!L) {								\
@@ -262,6 +299,10 @@ out:											\
 	{										\
 		int ret;								\
 		DECLARE_STATS_VARS();							\
+		if (!lua_lsm_hook_active(__LL_NR_ ## NAME)) {				\
+			LUA_LSM_INACTIVE_CLEANUP(x, NAME, ##__VA_ARGS__);		\
+			return (rettype)LSM_RET_DEFAULT(NAME);				\
+		}									\
 		START_STATS(NAME);							\
 		ret = __prepare_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));		\
 		if (ret >= 0) {								\
