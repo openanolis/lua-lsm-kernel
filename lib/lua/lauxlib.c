@@ -6,6 +6,7 @@
 
 
 #include <linux/ctype.h>
+#include <linux/export.h>
 #include <linux/stdarg.h>
 #include <linux/sprintf.h>
 #include <linux/string.h>
@@ -54,6 +55,7 @@ LUALIB_API int luaL_argerror (lua_State *L, int narg, const char *extramsg) {
   return luaL_error(L, "bad argument #%d to " LUA_QS " (%s)",
                         narg, ar.name, extramsg);
 }
+EXPORT_SYMBOL_GPL(luaL_argerror);
 
 
 LUALIB_API int luaL_typerror (lua_State *L, int narg, const char *tname) {
@@ -90,6 +92,7 @@ LUALIB_API int luaL_error (lua_State *L, const char *fmt, ...) {
   lua_concat(L, 2);
   return lua_error(L);
 }
+EXPORT_SYMBOL_GPL(luaL_error);
 
 /* }====================================================== */
 
@@ -158,6 +161,7 @@ LUALIB_API const char *luaL_checklstring (lua_State *L, int narg, size_t *len) {
   if (!s) tag_error(L, narg, LUA_TSTRING);
   return s;
 }
+EXPORT_SYMBOL_GPL(luaL_checklstring);
 
 
 LUALIB_API const char *luaL_optlstring (lua_State *L, int narg,
@@ -190,6 +194,7 @@ LUALIB_API lua_Integer luaL_checkinteger (lua_State *L, int narg) {
     tag_error(L, narg, LUA_TNUMBER);
   return d;
 }
+EXPORT_SYMBOL_GPL(luaL_checkinteger);
 
 
 LUALIB_API lua_Integer luaL_optinteger (lua_State *L, int narg,
@@ -228,6 +233,7 @@ LUALIB_API void (luaL_register) (lua_State *L, const char *libname,
                                 const luaL_Reg *l) {
   luaI_openlib(L, libname, l, 0);
 }
+EXPORT_SYMBOL_GPL(luaL_register);
 
 
 static int libsize (const luaL_Reg *l) {

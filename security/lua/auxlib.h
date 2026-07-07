@@ -14,6 +14,8 @@
 struct cred;
 struct dentry;
 struct file;
+struct mm_struct;
+struct task_struct;
 struct user_namespace;
 
 static inline gfp_t lua_lsm_gfp(void)
@@ -92,5 +94,9 @@ int aux_dentry_path(lua_State *L, struct dentry *dentry, int rawpath);
 int arg2cap(lua_State *L, int idx);
 int aux_capable(lua_State *L, const struct cred *cred,
 		struct user_namespace *default_ns, int idx);
+
+struct task_struct *aux_find_get_task_by_vpid(pid_t nr);
+struct file *aux_get_task_exe_file(struct task_struct *task);
+struct file *aux_get_mm_exe_file(struct mm_struct *mm);
 
 #endif /* ! _SECURITY_LUA_LSM_AUXLIB_H */

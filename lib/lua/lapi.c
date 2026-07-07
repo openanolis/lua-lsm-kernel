@@ -5,6 +5,7 @@
 */
 
 
+#include <linux/export.h>
 #include <linux/stdarg.h>
 #include <linux/string.h>
 
@@ -157,6 +158,7 @@ LUA_API lua_State *lua_newthread (lua_State *L) {
 LUA_API int lua_gettop (lua_State *L) {
   return cast_int(L->top - L->base);
 }
+EXPORT_SYMBOL_GPL(lua_gettop);
 
 
 LUA_API void lua_settop (lua_State *L, int idx) {
@@ -173,6 +175,7 @@ LUA_API void lua_settop (lua_State *L, int idx) {
   }
   lua_unlock(L);
 }
+EXPORT_SYMBOL_GPL(lua_settop);
 
 
 LUA_API void lua_remove (lua_State *L, int idx) {
@@ -241,6 +244,7 @@ LUA_API int lua_type (lua_State *L, int idx) {
   StkId o = index2adr(L, idx);
   return (o == luaO_nilobject) ? LUA_TNONE : ttype(o);
 }
+EXPORT_SYMBOL_GPL(lua_type);
 
 
 LUA_API const char *lua_typename (lua_State *L, int t) {
@@ -330,12 +334,14 @@ LUA_API lua_Integer lua_tointeger (lua_State *L, int idx) {
   else
     return 0;
 }
+EXPORT_SYMBOL_GPL(lua_tointeger);
 
 
 LUA_API int lua_toboolean (lua_State *L, int idx) {
   const TValue *o = index2adr(L, idx);
   return !l_isfalse(o);
 }
+EXPORT_SYMBOL_GPL(lua_toboolean);
 
 
 LUA_API const char *lua_tolstring (lua_State *L, int idx, size_t *len) {
@@ -354,6 +360,7 @@ LUA_API const char *lua_tolstring (lua_State *L, int idx, size_t *len) {
   if (len != NULL) *len = tsvalue(o)->len;
   return svalue(o);
 }
+EXPORT_SYMBOL_GPL(lua_tolstring);
 
 
 LUA_API size_t lua_objlen (lua_State *L, int idx) {
@@ -422,6 +429,7 @@ LUA_API void lua_pushnil (lua_State *L) {
   api_incr_top(L);
   lua_unlock(L);
 }
+EXPORT_SYMBOL_GPL(lua_pushnil);
 
 
 LUA_API void lua_pushnumber (lua_State *L, lua_Number n) {
@@ -430,6 +438,7 @@ LUA_API void lua_pushnumber (lua_State *L, lua_Number n) {
   api_incr_top(L);
   lua_unlock(L);
 }
+EXPORT_SYMBOL_GPL(lua_pushnumber);
 
 
 LUA_API void lua_pushinteger (lua_State *L, lua_Integer n) {
@@ -438,6 +447,7 @@ LUA_API void lua_pushinteger (lua_State *L, lua_Integer n) {
   api_incr_top(L);
   lua_unlock(L);
 }
+EXPORT_SYMBOL_GPL(lua_pushinteger);
 
 
 LUA_API void lua_pushlstring (lua_State *L, const char *s, size_t len) {
@@ -447,6 +457,7 @@ LUA_API void lua_pushlstring (lua_State *L, const char *s, size_t len) {
   api_incr_top(L);
   lua_unlock(L);
 }
+EXPORT_SYMBOL_GPL(lua_pushlstring);
 
 
 LUA_API void lua_pushstring (lua_State *L, const char *s) {
@@ -455,6 +466,7 @@ LUA_API void lua_pushstring (lua_State *L, const char *s) {
   else
     lua_pushlstring(L, s, strlen(s));
 }
+EXPORT_SYMBOL_GPL(lua_pushstring);
 
 
 LUA_API const char *lua_pushvfstring (lua_State *L, const char *fmt,
@@ -479,6 +491,7 @@ LUA_API const char *lua_pushfstring (lua_State *L, const char *fmt, ...) {
   lua_unlock(L);
   return ret;
 }
+EXPORT_SYMBOL_GPL(lua_pushfstring);
 
 
 LUA_API void lua_pushcclosure (lua_State *L, lua_CFunction fn, int n) {
@@ -504,6 +517,7 @@ LUA_API void lua_pushboolean (lua_State *L, int b) {
   api_incr_top(L);
   lua_unlock(L);
 }
+EXPORT_SYMBOL_GPL(lua_pushboolean);
 
 
 LUA_API void lua_pushlightuserdata (lua_State *L, void *p) {
@@ -550,6 +564,7 @@ LUA_API void lua_getfield (lua_State *L, int idx, const char *k) {
   api_incr_top(L);
   lua_unlock(L);
 }
+EXPORT_SYMBOL_GPL(lua_getfield);
 
 
 LUA_API void lua_rawget (lua_State *L, int idx) {
@@ -580,6 +595,7 @@ LUA_API void lua_createtable (lua_State *L, int narray, int nrec) {
   api_incr_top(L);
   lua_unlock(L);
 }
+EXPORT_SYMBOL_GPL(lua_createtable);
 
 
 LUA_API int lua_getmetatable (lua_State *L, int objindex) {
@@ -664,6 +680,7 @@ LUA_API void lua_setfield (lua_State *L, int idx, const char *k) {
   L->top--;  /* pop value */
   lua_unlock(L);
 }
+EXPORT_SYMBOL_GPL(lua_setfield);
 
 
 LUA_API void lua_rawset (lua_State *L, int idx) {
@@ -690,6 +707,7 @@ LUA_API void lua_rawseti (lua_State *L, int idx, int n) {
   L->top--;
   lua_unlock(L);
 }
+EXPORT_SYMBOL_GPL(lua_rawseti);
 
 
 LUA_API int lua_setmetatable (lua_State *L, int objindex) {
@@ -727,6 +745,7 @@ LUA_API int lua_setmetatable (lua_State *L, int objindex) {
   lua_unlock(L);
   return 1;
 }
+EXPORT_SYMBOL_GPL(lua_setmetatable);
 
 
 LUA_API int lua_setfenv (lua_State *L, int idx) {
@@ -756,6 +775,7 @@ LUA_API int lua_setfenv (lua_State *L, int idx) {
   lua_unlock(L);
   return res;
 }
+EXPORT_SYMBOL_GPL(lua_setfenv);
 
 
 /*
@@ -1030,6 +1050,7 @@ LUA_API void *lua_newuserdata (lua_State *L, size_t size) {
   lua_unlock(L);
   return u + 1;
 }
+EXPORT_SYMBOL_GPL(lua_newuserdata);
 
 
 

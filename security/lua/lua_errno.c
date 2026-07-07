@@ -1,14 +1,21 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Lua based LSM
+ * Lua based LSM - errno API library.
  *
  * Copyright (C) 2025 The Alibaba Cloud Linux Authors.
  */
 
+#define LUA_API_KMOD
+
 #include "debug.h"
 #include <linux/errno.h>
 #include <linux/errname.h>
-#include "lsm.h"
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/printk.h>
+#include <linux/lua.h>
+#include <linux/lauxlib.h>
+#include <linux/lua_lsm_api.h>
 #include "auxlib.h"
 
 static const struct const_value errnos[] = {
@@ -57,14 +64,44 @@ static int errno_errname(lua_State *L)
 	return 1;
 }
 
-static const luaL_Reg errnolib[] = {
+static const luaL_Reg errno_lib[] = {
 	{ "errname",	errno_errname	},
 	{ NULL, NULL }
 };
 
-int luaopen_errno(lua_State *L)
+static int errno_init_table(lua_State *L)
 {
-	luaL_newlib(L, errnolib);
 	setconst(L, errnos);
-	return 1;
+	return 0;
 }
+
+static struct lua_api_lib errno_desc = {
+	.name		= "errno",
+	.funcs		= errno_lib,
+	.init_table	= errno_init_table,
+	.owner		= THIS_MODULE,
+	.abi_version	= LUA_API_LIB_ABI_VERSION,
+};
+
+static int __init lua_errno_lib_init(void)
+{
+	int err;
+
+#ifdef MODULE
+	err = lua_api_lib_register(&errno_desc);
+#else
+	err = __lua_api_lib_register(&errno_desc);
+#endif
+	if (err)
+		pr_err("lua-lsm: failed to register 'errno' library: %d\n", err);
+	return err;
+}
+
+static void __exit lua_errno_lib_exit(void)
+{
+}
+
+module_init(lua_errno_lib_init);
+module_exit(lua_errno_lib_exit);
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("lua-lsm errno API library");

@@ -25,3 +25,80 @@ config SECURITY_LUA_LSM_DEBUG
 	  This enables debugging code designed to help Lua-LSM kernel
 	  developers, unless you know what this does in the kernel code you
 	  should leave this disabled.
+
+config LUA_LSM_REQUIRE_SIGNED_API
+	bool "Require signed lua-lsm API library modules"
+	depends on SECURITY_LUA_LSM && MODULE_SIG
+	default y if MODULE_SIG_FORCE
+	help
+	  When enabled, lua-lsm rejects unsigned API library modules at
+	  registration time.  Enable this on systems that already require
+	  signed kernel modules.
+
+	  If unsure, say N.
+
+config LUA_LSM_LIB_KERNEL
+	tristate "lua-lsm kernel API library"
+	depends on SECURITY_LUA_LSM
+	default y if SECURITY_LUA_LSM=y
+	help
+	  Lua API library exposing task, credential, namespace, securebits,
+	  and randomness helpers to lua-lsm policy code.
+	  Policy code loads this library with require("kernel").
+
+	  Say Y to build into the core, or M for a loadable producer.
+
+config LUA_LSM_LIB_FS
+	tristate "lua-lsm fs API library"
+	depends on SECURITY_LUA_LSM
+	default y if SECURITY_LUA_LSM=y
+	help
+	  Lua API library exposing dentry, inode, file, path, mount,
+	  superblock, and fs context helpers to lua-lsm policy code.
+	  Policy code loads this library with require("fs").
+
+	  Say Y to build into the core, or M for a loadable producer.
+
+config LUA_LSM_LIB_NET
+	tristate "lua-lsm net API library"
+	depends on SECURITY_LUA_LSM
+	default y if SECURITY_LUA_LSM=y
+	help
+	  Lua API library exposing socket, sock, skb, and sockaddr helpers
+	  to lua-lsm policy code.
+	  Policy code loads this library with require("net").
+
+	  Say Y to build into the core, or M for a loadable producer.
+
+config LUA_LSM_LIB_ERRNO
+	tristate "lua-lsm errno API library"
+	depends on SECURITY_LUA_LSM
+	default y if SECURITY_LUA_LSM=y
+	help
+	  Lua API library exposing errno constants and errname() so
+	  lua-lsm policy code can translate kernel error values.
+	  Policy code loads this library with require("errno").
+
+	  Say Y to build into the core, or M for a loadable producer.
+
+config LUA_LSM_LIB_CAPABILITY
+	tristate "lua-lsm capability API library"
+	depends on SECURITY_LUA_LSM
+	default y if SECURITY_LUA_LSM=y
+	help
+	  Lua API library exposing capability constants, cap helpers, and
+	  capable() checks to lua-lsm policy code.
+	  Policy code loads this library with require("capability").
+
+	  Say Y to build into the core, or M for a loadable producer.
+
+config LUA_LSM_LIB_SIGNAL
+	tristate "lua-lsm signal API library"
+	depends on SECURITY_LUA_LSM
+	default y if SECURITY_LUA_LSM=y
+	help
+	  Lua API library exposing signal constants to lua-lsm policy code.
+	  It provides symbolic names for kernel signal numbers.
+	  Policy code loads this library with require("signal").
+
+	  Say Y to build into the core, or M for a loadable producer.

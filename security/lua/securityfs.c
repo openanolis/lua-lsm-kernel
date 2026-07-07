@@ -118,6 +118,18 @@ static const struct file_operations fops_modules = {
 	.release	= single_release,
 };
 
+static int open_api_libraries(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, lua_api_libraries_show, NULL);
+}
+
+static const struct file_operations fops_api_libraries = {
+	.open		= open_api_libraries,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
 
 static int stats_show(struct seq_file *m, void *v)
@@ -163,6 +175,7 @@ static struct lua_lsm_file {
 	{ "register",	0222,	&fops_register		},	/* -w--w--w- */
 	{ "unregister",	0222,	&fops_unregister	},	/* -w--w--w- */
 	{ "modules",	0444,	&fops_modules		},	/* r--r--r-- */
+	{ "api_libraries", 0444, &fops_api_libraries	},	/* r--r--r-- */
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
 	{ "stats",	0444,	&fops_stats		},	/* r--r--r-- */
 	{ "lsm_funcs",	0444,	&fops_lsm_funcs		},	/* r--r--r-- */

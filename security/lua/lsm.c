@@ -8,6 +8,7 @@
 #define pr_fmt(fmt)	"lua-lsm: " fmt
 
 #include "debug.h"
+#include <linux/err.h>
 #include <linux/init.h>
 #include <linux/bitops.h>
 #include <linux/kstrtox.h>
@@ -25,6 +26,7 @@
 #include <linux/lua.h>
 #include <linux/lualib.h>
 #include <linux/lauxlib.h>
+#include <linux/lua_lsm_api.h>
 #include "lsm.h"
 #include "lua_object.h"
 #include "lsm_defs.h"
@@ -48,7 +50,9 @@ int lua_lsm_initialized __initdata;
 /********************************* lsm hook *********************************/
 
 struct list_head lsm_modules = LIST_HEAD_INIT(lsm_modules);
-static DEFINE_MUTEX(modules_mutex);
+
+/* Serializes policy module and API library registry updates. */
+DEFINE_MUTEX(modules_mutex);
 DEFINE_SRCU(modules_ss);
 
 DEFINE_STATIC_KEY_FALSE(lua_lsm_modules_active);
@@ -266,12 +270,11 @@ static inline void lvm_stats_memalloc(struct lvm_state *lvm, void *ptr,
 
 /********************************** lvm **********************************/
 
-static DEFINE_PER_CPU(struct lvm_state *, irq_lvms);
+DEFINE_PER_CPU(struct lvm_state *, irq_lvms);
 
 static lua_State *lvm_build_lua_state(struct lvm_state *lvm);
 static void *lvm_alloc(void *ud, void *ptr, size_t osize, size_t nsize);
 static int lua_state_alloc(struct lvm_state *lvm);
-static void lua_state_free(struct lvm_state *lvm);
 
 #define LUA_LVM_POOL_MAX_DEFAULT	32
 #define LUA_LVM_POOL_MAX_LIMIT		256
@@ -304,13 +307,7 @@ static int __init lua_lvm_pool_max_setup(char *str)
 }
 __setup("lua.lvm_pool_max=", lua_lvm_pool_max_setup);
 
-struct lvm_pool_cpu {
-	struct lvm_state *head;
-	unsigned int count;
-	raw_spinlock_t lock;
-};
-
-static DEFINE_PER_CPU(struct lvm_pool_cpu, lvm_pools);
+DEFINE_PER_CPU(struct lvm_pool_cpu, lvm_pools);
 
 static void lvm_pool_init_cpu(int cpu)
 {
@@ -323,18 +320,29 @@ static void lvm_pool_init_cpu(int cpu)
 
 static struct lvm_state *lvm_pool_get(void)
 {
+	struct lvm_state *lvm = NULL, *stale = NULL, *next;
 	struct lvm_pool_cpu *pool;
-	struct lvm_state *lvm = NULL;
+	unsigned int registry_gen;
 	unsigned long flags;
 	int cpu;
+
+	registry_gen = (unsigned int)atomic_read(&lua_api_lib_generation);
 
 	cpu = get_cpu();
 	pool = &per_cpu(lvm_pools, cpu);
 	raw_spin_lock_irqsave(&pool->lock, flags);
-	if (pool->head) {
-		lvm = pool->head;
-		pool->head = lvm->next;
+	while (pool->head) {
+		struct lvm_state *cur = pool->head;
+
+		pool->head = cur->next;
 		pool->count--;
+		if (cur->generation == registry_gen) {
+			lvm = cur;
+			break;
+		}
+		/* Stash; lua_close() must not run preempt-disabled. */
+		cur->next = stale;
+		stale = cur;
 	}
 	raw_spin_unlock_irqrestore(&pool->lock, flags);
 	put_cpu();
@@ -342,6 +350,35 @@ static struct lvm_state *lvm_pool_get(void)
 	if (lvm)
 		lvm->next = NULL;
 
+	while (stale) {
+		next = stale->next;
+		lvm_state_free_heap(stale);
+		stale = next;
+	}
+
+	return lvm;
+}
+
+static struct lvm_state *lvm_state_build_task(void)
+{
+	struct lvm_state *lvm;
+	int err;
+
+	lvm = lvm_pool_get();
+	if (!lvm) {
+		lvm = kzalloc(sizeof(*lvm), lua_lsm_gfp());
+		if (!lvm)
+			return NULL;
+
+		err = lua_state_alloc(lvm);
+		if (err) {
+			kfree(lvm);
+			return NULL;
+		}
+	}
+
+	lvm->next = NULL;
+	refcount_init(&lvm->refcount, 0);
 	return lvm;
 }
 
@@ -366,10 +403,8 @@ static void lvm_pool_put(struct lvm_state *lvm)
 	raw_spin_unlock_irqrestore(&pool->lock, flags);
 	put_cpu();
 
-	if (lvm) {
-		lua_state_free(lvm);
-		kfree(lvm);
-	}
+	if (lvm)
+		lvm_state_free_heap(lvm);
 }
 
 static void lvm_vm_reset(struct lvm_state *lvm)
@@ -482,11 +517,12 @@ lvm_get_task_state(const struct task_struct *task, bool create)
 	return lvm;
 }
 
-static lua_State *
-lvm_get_from_task(const struct task_struct *task, bool require_idle)
+lua_State *
+lvm_get_from_task(const struct task_struct *task, bool exclusive)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
-	struct lvm_state *lvm = lvm_get_task_state(task, !require_idle);
+	struct lvm_state *lvm = lvm_get_task_state(task, !exclusive);
+	unsigned int registry_gen;
 	lua_State *L;
 	int n;
 
@@ -496,48 +532,47 @@ lvm_get_from_task(const struct task_struct *task, bool require_idle)
 	n = refcount_acquire(&lvm->refcount);
 	if (unlikely(lvm_task_teardown(llt)))
 		goto err_put;
-	if (require_idle && n != 1) {
+	if (exclusive && n != 1) {
 		refcount_release(&lvm->refcount);
 		return NULL;
 	}
-	if (!require_idle) {
+	if (!exclusive) {
 		WARN_ON(n != 1);
 		KASSERT(n == 1, ("<%s> Lua VM is reused, refcount = %d\n",
 				 task->comm, n));
 	}
 
 	L = smp_load_acquire(&lvm->L);
-	if (!L) {
-		struct lvm_state *pooled = lvm_pool_get();
-		struct lvm_state build_owner;
-		struct lvm_state *owner;
-		lua_State *built;
+	registry_gen = (unsigned int)atomic_read(&lua_api_lib_generation);
+	if (!L || unlikely(READ_ONCE(lvm->generation) < registry_gen)) {
+		struct lvm_state *new_lvm;
 
-		if (pooled) {
-			built = pooled->L;
-			pooled->L = NULL;
-			owner = pooled;
-		} else {
-			memset(&build_owner, 0, sizeof(build_owner));
-			built = lvm_build_lua_state(&build_owner);
-			if (!built)
+		if (n != 1)
+			goto err_put;
+
+		for (;;) {
+			new_lvm = lvm_state_build_task();
+			if (!new_lvm)
 				goto err_put;
-			owner = &build_owner;
+
+			registry_gen = (unsigned int)atomic_read(&lua_api_lib_generation);
+			if (likely(READ_ONCE(new_lvm->generation) >= registry_gen))
+				break;
+
+			lvm_state_free_heap(new_lvm);
 		}
-		lua_setallocf(built, lvm_alloc, lvm);
-#ifdef CONFIG_SECURITY_LUA_LSM_STATS
-		atomic64_set(&lvm->nalloc, atomic64_read(&owner->nalloc));
-		atomic64_set(&lvm->nrealloc,
-			     atomic64_read(&owner->nrealloc));
-		atomic64_set(&lvm->nfree, atomic64_read(&owner->nfree));
-#endif
-		kfree(pooled);
-		/*
-		 * Readers treat non-NULL lvm->L as a ready VM, so publish it
-		 * only after the allocator owner has moved to the task lvm.
-		 */
-		smp_store_release(&lvm->L, built);
-		L = built;
+		refcount_init(&new_lvm->refcount, 1);
+
+		if (unlikely(lvm_task_teardown(llt)) ||
+		    atomic_read(&lvm->refcount) != 1 ||
+		    cmpxchg(&llt->lvm, lvm, new_lvm) != lvm) {
+			lvm_state_free_heap(new_lvm);
+			goto err_put;
+		}
+
+		lvm_state_free_heap(lvm);
+		lvm = new_lvm;
+		L = lvm->L;
 	}
 	return L;
 
@@ -546,7 +581,7 @@ err_put:
 	return NULL;
 }
 
-static void lvm_put_to_task(const struct task_struct *task, lua_State *L)
+void lvm_put_to_task(const struct task_struct *task, lua_State *L)
 {
 	struct lua_lsm_task *llt = lua_lsm_task(task);
 	struct lvm_state *lvm = READ_ONCE(llt->lvm);
@@ -768,10 +803,10 @@ static int lua_modules_index(lua_State *L)
 }
 
 /*
- * When LuaVM is destroyed, iterate over the modules loaded in the VM
- * and update the load count in the module.
+ * Drop each loaded policy module reference recorded in a Lua VM's
+ * _MODULES table, decrementing module->nloaded for every loaded entry.
  */
-static void lua_modules_free(struct task_struct *task, lua_State *L)
+static void lvm_put_loaded_modules(struct task_struct *task, lua_State *L)
 {
 	struct lua_lsm_module *module;
 
@@ -786,9 +821,13 @@ static void lua_modules_free(struct task_struct *task, lua_State *L)
 		lua_rawget(L, -2);
 		if (lua_istable(L, -1)) {
 			atomic_dec(&module->nloaded);
-			__log_info("<%s>: %d-%d freed module <%s>, nloaded = %d\n",
-				   task->comm, task_tgid_nr(task), task_pid_nr(task),
-				   module->name, atomic_read(&module->nloaded));
+			if (task)
+				__log_info("<%s>: %d-%d dropped module <%s>, nloaded = %d\n",
+					   task->comm, task_tgid_nr(task), task_pid_nr(task),
+					   module->name, atomic_read(&module->nloaded));
+			else
+				__log_info("dropped module <%s>, nloaded = %d\n",
+					   module->name, atomic_read(&module->nloaded));
 		}
 		lua_pop(L, 1);
 	}
@@ -796,27 +835,6 @@ static void lua_modules_free(struct task_struct *task, lua_State *L)
 }
 
 /********************************** Lua VM **********************************/
-
-static const luaL_Reg builtinlibs[] = {
-	{ "kernel",	luaopen_kernel		},
-	{ "fs",		luaopen_fs		},
-	{ "net",	luaopen_net		},
-	{ "errno",	luaopen_errno		},
-	{ "capability",	luaopen_capability	},
-	{ "signal",	luaopen_signal		},
-	{ NULL, NULL }
-};
-
-static void lualibs_openall(lua_State *L)
-{
-	const luaL_Reg *lib;
-
-	/* TODO: loaded if needed */
-	for (lib = builtinlibs; lib->func; lib++) {
-		luaL_requiref(L, lib->name, lib->func, 0);
-		lua_pop(L, 1);
-	}
-}
 
 static int ll_require(lua_State *L)
 {
@@ -850,10 +868,29 @@ static int lvm_panic(lua_State *L)
 
 static int lvm_pmain(lua_State *L)
 {
+	int err;
+
 	luaL_openlibs(L);
 
-	/* open builtin libraries */
-	lualibs_openall(L);
+	/* Seed metatables before any installer attaches methods to them. */
+	err = lib_metatables_init(L);
+	if (err) {
+		struct lvm_state *owner = lvm_state_from_lua_state(L);
+
+		if (owner)
+			owner->init_err = err;
+		luaL_error(L, "lib_metatables_init failed: %d", err);
+	}
+
+	/* Preserve the real errno; lua_state_alloc() only sees pcall failure. */
+	err = lualibs_openall_dynamic(L);
+	if (err) {
+		struct lvm_state *owner = lvm_state_from_lua_state(L);
+
+		if (owner)
+			owner->init_err = err;
+		luaL_error(L, "lualibs_openall_dynamic failed: %d", err);
+	}
 
 	/* shared dict init */
 	shdict_init(L);
@@ -928,13 +965,64 @@ static int lua_state_alloc(struct lvm_state *lvm)
 	return 0;
 }
 
-static void lua_state_free(struct lvm_state *lvm)
+void lua_state_free(struct lvm_state *lvm)
 {
 	if (lvm->L) {
+		if (lvm->dirty) {
+			int idx = srcu_read_lock(&modules_ss);
+
+			lvm_put_loaded_modules(NULL, lvm->L);
+			srcu_read_unlock(&modules_ss, idx);
+			lvm->dirty = false;
+		}
 		lvm_stats_vmfree();
 		lua_close(lvm->L);
 		lvm->L = NULL;
 	}
+}
+
+/* Allocate a heap-owned, fully initialized lvm_state for process context. */
+struct lvm_state *lvm_state_build_new(void)
+{
+	struct lvm_state *lvm;
+	int err;
+
+	lvm = kzalloc(sizeof(*lvm), GFP_KERNEL);
+	if (!lvm)
+		return ERR_PTR(-ENOMEM);
+
+	err = lua_state_alloc(lvm);
+	if (err) {
+		int init_err = lvm->init_err;
+
+		kfree(lvm);
+		/* Map the internal -ENOEXEC to -ENOMEM for the public ABI. */
+		return ERR_PTR(init_err ? init_err : -ENOMEM);
+	}
+	return lvm;
+}
+
+/* Free a heap-owned lvm_state.  Use lua_state_free() for embedded states. */
+void lvm_state_free_heap(struct lvm_state *lvm)
+{
+	if (!lvm)
+		return;
+	lua_state_free(lvm);
+	kfree(lvm);
+}
+
+/* Return the owning lvm_state for @L; NULL if @L is not a lua-lsm VM. */
+struct lvm_state *lvm_state_from_lua_state(lua_State *L)
+{
+	lua_Alloc cur;
+	void *ud;
+
+	if (!L)
+		return NULL;
+	cur = lua_getallocf(L, &ud);
+	if (cur != lvm_alloc)
+		return NULL;
+	return ud;
 }
 
 /********************************** module **********************************/
@@ -1460,7 +1548,10 @@ void task_blob_free(struct task_struct *task)
 	/* Pairs with cmpxchg() in lvm_get_task_state(). */
 	lvm = smp_load_acquire(&llt->lvm);
 	if (lvm && READ_ONCE(lvm->L) && lvm->dirty) {
-		lua_modules_free(task, lvm->L);
+		int idx = srcu_read_lock(&modules_ss);
+
+		lvm_put_loaded_modules(task, lvm->L);
+		srcu_read_unlock(&modules_ss, idx);
 		lvm_vm_reset(lvm);
 		lvm->dirty = false;
 	}
@@ -1536,6 +1627,7 @@ static int __init lua_lsm_init(void)
 	if (err)
 		return err;
 
+	/* Empty IRQ VMs; producer module_init() will replay into them. */
 	for_each_possible_cpu(cpu) {
 		lvm = kzalloc(sizeof(struct lvm_state), GFP_KERNEL);
 		if (!lvm)
@@ -1554,6 +1646,14 @@ static int __init lua_lsm_init(void)
 			continue;
 		security_add_hooks(&lua_lsm_hooks[i], 1, &lua_lsmid);
 	}
+
+	/* Install before opening the registry so offline-CPU registers are picked up on hotplug. */
+	err = lua_api_lib_cpu_hotplug_init();
+	if (err)
+		return err;
+
+	/* Open the registry to producer module_init() callbacks. */
+	WRITE_ONCE(lua_api_lib_registry_ready, true);
 
 	/* Report that Lua-LSM successfully initialized */
 	lua_lsm_initialized = 1;

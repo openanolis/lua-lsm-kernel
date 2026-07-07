@@ -7,6 +7,7 @@
 
 #include "debug.h"
 #include <linux/bottom_half.h>
+#include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/errname.h>
@@ -15,6 +16,7 @@
 #include <linux/lua.h>
 #include <linux/lualib.h>
 #include <linux/lauxlib.h>
+#include <linux/lua_lsm_api.h>
 #include "auxlib.h"
 #include "lsm.h"
 #include "kvcache.h"
@@ -548,6 +550,7 @@ void kvcache_dict_free(struct kvcache_dict *dict)
 	}
 	WARN_ON(atomic_read(&dict->count) != 0);
 }
+EXPORT_SYMBOL_GPL(kvcache_dict_free);
 
 void kvcache_dict_init(struct kvcache_dict *dict)
 {
@@ -555,6 +558,7 @@ void kvcache_dict_init(struct kvcache_dict *dict)
 	__kvcache_dict_init(dict);
 	atomic_set_release(&dict->state, KVCACHE_DICT_READY);
 }
+EXPORT_SYMBOL_GPL(kvcache_dict_init);
 
 /******************************** object cache *******************************/
 
@@ -600,6 +604,7 @@ int lua_object_get(lua_State *L, struct kvcache_dict *dict)
 		return 0;
 	return kvcache_get(L, dict, module);
 }
+EXPORT_SYMBOL_GPL(lua_object_get);
 
 int lua_object_incr(lua_State *L, struct kvcache_dict *dict)
 {
@@ -614,6 +619,7 @@ int lua_object_incr(lua_State *L, struct kvcache_dict *dict)
 
 	return kvcache_incr(L, dict, module);
 }
+EXPORT_SYMBOL_GPL(lua_object_incr);
 
 /*
  *	__index = function(object, key)
@@ -649,6 +655,7 @@ int lua_object_index(lua_State *L, struct kvcache_dict *dict)
 
 	return lua_object_get(L, dict);
 }
+EXPORT_SYMBOL_GPL(lua_object_index);
 
 /*
  *	__newindex = function(object, key, v)
@@ -669,6 +676,7 @@ int lua_object_newindex(lua_State *L, struct kvcache_dict *dict)
 
 	return kvcache_set(L, dict, module);
 }
+EXPORT_SYMBOL_GPL(lua_object_newindex);
 
 /******************************** shared dict ********************************/
 
@@ -741,6 +749,5 @@ static const luaL_Reg shdict_meth[] = {
 
 int shdict_init(lua_State *L)
 {
-	createmeta(L, METH_SHARED_DICT, "shdict", shdict_meth, NULL, 1);
-	return 0;
+	return lua_api_lib_meta_install(L, "shdict", shdict_meth, NULL);
 }

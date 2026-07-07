@@ -1,13 +1,21 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Lua based LSM
+ * Lua based LSM - signal API library.
  *
  * Copyright (C) 2025 The Alibaba Cloud Linux Authors.
  */
 
+#define LUA_API_KMOD
+
 #include "debug.h"
+#include <linux/errno.h>
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/printk.h>
 #include <linux/signal.h>
-#include "lsm.h"
+#include <linux/lua.h>
+#include <linux/lauxlib.h>
+#include <linux/lua_lsm_api.h>
 #include "auxlib.h"
 
 static const struct const_value signals[] = {
@@ -47,9 +55,49 @@ static const struct const_value signals[] = {
 	{ NULL }
 };
 
-int luaopen_signal(lua_State *L)
+/*
+ * Empty funcs sentinel - the signal library exposes constants only,
+ * but the registration ABI requires a non-NULL funcs table.  Constants
+ * are published on the library table from init_table() after the
+ * (empty) funcs registration has been performed by the core.
+ */
+static const luaL_Reg signal_lib[] = {
+	{ NULL, NULL }
+};
+
+static int signal_init_table(lua_State *L)
 {
-	lua_newtable(L);
 	setconst(L, signals);
-	return 1;
+	return 0;
 }
+
+static struct lua_api_lib signal_desc = {
+	.name		= "signal",
+	.funcs		= signal_lib,
+	.init_table	= signal_init_table,
+	.owner		= THIS_MODULE,
+	.abi_version	= LUA_API_LIB_ABI_VERSION,
+};
+
+static int __init lua_signal_lib_init(void)
+{
+	int err;
+
+#ifdef MODULE
+	err = lua_api_lib_register(&signal_desc);
+#else
+	err = __lua_api_lib_register(&signal_desc);
+#endif
+	if (err)
+		pr_err("lua-lsm: failed to register 'signal' library: %d\n", err);
+	return err;
+}
+
+static void __exit lua_signal_lib_exit(void)
+{
+}
+
+module_init(lua_signal_lib_init);
+module_exit(lua_signal_lib_exit);
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("lua-lsm signal API library");

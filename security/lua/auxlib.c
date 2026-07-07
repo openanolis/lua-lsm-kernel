@@ -9,10 +9,14 @@
 
 #include "debug.h"
 #include <linux/bitops.h>
+#include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/string.h>
 #include <linux/errname.h>
+#include <linux/sched.h>
+#include <linux/sched/mm.h>
+#include <linux/mm.h>
 #include <linux/security.h>
 #include <linux/capability.h>
 #include <linux/lua.h>
@@ -151,6 +155,7 @@ int luaL_loadbuffer_wrap(lua_State *L, const char *buff,
 	}
 	return 0;
 }
+EXPORT_SYMBOL_GPL(luaL_loadbuffer_wrap);
 
 int lua_pcall_wrap(lua_State *L, int nargs, int nresults, int errfunc)
 {
@@ -276,6 +281,7 @@ unsigned int tocflags(lua_State *L, int idx, int top,
 
 	return flags;
 }
+EXPORT_SYMBOL_GPL(tocflags);
 
 const char *
 fromcflags(const struct cflag_opt *opts, unsigned int flag, const char *d)
@@ -288,6 +294,7 @@ fromcflags(const struct cflag_opt *opts, unsigned int flag, const char *d)
 	}
 	return d;
 }
+EXPORT_SYMBOL_GPL(fromcflags);
 
 void table_fromopts(lua_State *L, const struct cflag_opt *opts,
 		    unsigned int bitfield, unsigned int mask)
@@ -308,6 +315,7 @@ void table_fromopts(lua_State *L, const struct cflag_opt *opts,
 		}
 	}
 }
+EXPORT_SYMBOL_GPL(table_fromopts);
 
 void **newcptr(lua_State *L, const char *metatable)
 {
@@ -316,6 +324,16 @@ void **newcptr(lua_State *L, const char *metatable)
 	luaL_getmetatable(L, metatable);
 	lua_setmetatable(L, -2);
 	return p;
+}
+EXPORT_SYMBOL_GPL(newcptr);
+
+static void meta_raw_register(lua_State *L, const luaL_Reg *meth)
+{
+	for (; meth && meth->name; meth++) {
+		lua_pushstring(L, meth->name);
+		lua_pushcfunction(L, meth->func);
+		lua_rawset(L, -3);
+	}
 }
 
 void createmeta(lua_State *L, const char *tname, const char *name,
@@ -330,10 +348,10 @@ void createmeta(lua_State *L, const char *tname, const char *name,
 	lua_pushvalue(L, -1);
 	lua_setfield(L, -2, "__index");
 	if (base)
-		luaL_register(L, NULL, base);
+		meta_raw_register(L, base);
 
 	if (meth)
-		luaL_register(L, NULL, meth);
+		meta_raw_register(L, meth);
 
 	if (pop)
 		lua_pop(L, 1);
@@ -354,6 +372,7 @@ void *checkudata(lua_State *L, int ud, const char *name)
 	}
 	return NULL;
 }
+EXPORT_SYMBOL_GPL(checkudata);
 
 /*
  *           meta           meta
@@ -400,6 +419,7 @@ void *checkudata3(lua_State *L, int ud, const char *tname)
 	luaL_typerror(L, ud, tname);
 	return NULL;
 }
+EXPORT_SYMBOL_GPL(checkudata3);
 
 void setconst(lua_State *L, const struct const_value *cv)
 {
@@ -409,6 +429,7 @@ void setconst(lua_State *L, const struct const_value *cv)
 		lua_settable(L, -3);
 	}
 }
+EXPORT_SYMBOL_GPL(setconst);
 
 int aux_file_path(lua_State *L, struct file *filp)
 {
@@ -451,6 +472,7 @@ int aux_file_path(lua_State *L, struct file *filp)
 		kfree(buf);
 	return nres;
 }
+EXPORT_SYMBOL_GPL(aux_file_path);
 
 int aux_dentry_path(lua_State *L, struct dentry *dentry, int rawpath)
 {
@@ -487,6 +509,7 @@ int aux_dentry_path(lua_State *L, struct dentry *dentry, int rawpath)
 		kfree(buf);
 	return nres;
 }
+EXPORT_SYMBOL_GPL(aux_dentry_path);
 
 int arg2cap(lua_State *L, int idx)
 {
@@ -553,6 +576,7 @@ int arg2cap(lua_State *L, int idx)
 		return luaL_argerror(L, idx, "invalid capability");
 	return cap;
 }
+EXPORT_SYMBOL_GPL(arg2cap);
 
 /*
  * [task:]capable(CAP_MAC_ADMIN)
@@ -599,3 +623,23 @@ int aux_capable(lua_State *L, const struct cred *cred,
 	lua_pushboolean(L, err == 0);
 	return 1;
 }
+EXPORT_SYMBOL_GPL(aux_capable);
+
+/* Export wrappers for non-exported task/mm executable lookup helpers. */
+struct task_struct *aux_find_get_task_by_vpid(pid_t nr)
+{
+	return find_get_task_by_vpid(nr);
+}
+EXPORT_SYMBOL_GPL(aux_find_get_task_by_vpid);
+
+struct file *aux_get_task_exe_file(struct task_struct *task)
+{
+	return get_task_exe_file(task);
+}
+EXPORT_SYMBOL_GPL(aux_get_task_exe_file);
+
+struct file *aux_get_mm_exe_file(struct mm_struct *mm)
+{
+	return get_mm_exe_file(mm);
+}
+EXPORT_SYMBOL_GPL(aux_get_mm_exe_file);

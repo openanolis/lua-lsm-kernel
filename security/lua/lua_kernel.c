@@ -1,13 +1,18 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Lua based LSM
+ * Lua based LSM - kernel API library.
  *
  * Copyright (C) 2025 The Alibaba Cloud Linux Authors.
  */
 
+#define LUA_API_KMOD
+
 #include "debug.h"
 #include <linux/version.h>
 #include <linux/args.h>
+#include <linux/errno.h>
+#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/printk.h>
 #include <linux/security.h>
 #include <linux/ptrace.h>
@@ -15,8 +20,8 @@
 #include <linux/lua.h>
 #include <linux/lualib.h>
 #include <linux/lauxlib.h>
+#include <linux/lua_lsm_api.h>
 #include <linux/securebits.h>
-#include "lsm.h"
 #include "auxlib.h"
 #include "kvcache.h"
 #include "lua_object.h"
@@ -355,7 +360,7 @@ static int kernel_task_exe_file(lua_State *L)
 		lua_pushstring(L, "busy");
 		return 2;
 	}
-	exe_file = get_task_exe_file(task);
+	exe_file = aux_get_task_exe_file(task);
 	if (!exe_file)
 		return 0;
 	*newgcfile(L) = exe_file;
@@ -373,14 +378,14 @@ static int kernel_task_exepath(lua_State *L)
 
 		if (!mm)
 			return 0;
-		file = get_mm_exe_file(mm);
+		file = aux_get_mm_exe_file(mm);
 	} else {
 		if (spin_is_locked(&task->alloc_lock)) {
 			lua_pushnil(L);
 			lua_pushstring(L, "busy");
 			return 2;
 		}
-		file = get_task_exe_file(task);
+		file = aux_get_task_exe_file(task);
 	}
 	if (file) {
 		nres = aux_file_path(L, file);
@@ -422,7 +427,7 @@ static int kernel_task_is_descendant(lua_State *L)
 
 	switch (tt) {
 	case LUA_TNUMBER:
-		parent_ref = find_get_task_by_vpid((pid_t)lua_tointeger(L, 2));
+		parent_ref = aux_find_get_task_by_vpid((pid_t)lua_tointeger(L, 2));
 		if (!parent_ref)
 			return luaL_argerror(L, 2, "invalid pid");
 		parent = parent_ref;
@@ -615,7 +620,7 @@ static int kernel_rcu_read_unlock(lua_State *L)
 static int kernel_task_from_pid(lua_State *L)
 {
 	pid_t nr = (pid_t)luaL_checkinteger(L, 1);
-	struct task_struct *task = find_get_task_by_vpid(nr);
+	struct task_struct *task = aux_find_get_task_by_vpid(nr);
 
 	if (!task)
 		return 0;
@@ -672,16 +677,63 @@ static const luaL_Reg kernellib[] = {
 	{ NULL, NULL }
 };
 
-LUALIB_API int luaopen_kernel(lua_State *L)
+static int kernel_init_table(lua_State *L)
 {
-	luaL_newlib(L, kernellib);
-	create_task_meta(L, task_meth, task_gc_meth);
-	create_cred_meta(L, cred_meth, NULL);
-	create_userns_meta(L, userns_meth, userns_gc_meth);
-	create_perfevent_meta(L, NULL, NULL);
-	create_ipc_meta(L, NULL, NULL);
-	create_msgmsg_meta(L, NULL, NULL);
-	create_key_meta(L, NULL, NULL);
-	create_bdev_meta(L, NULL, NULL);
-	return 1;
+	static const struct {
+		const char *name;
+		const luaL_Reg *meth;
+		const luaL_Reg *gc_meth;
+	} metas[] = {
+		{ "task",	task_meth,	task_gc_meth },
+		{ "cred",	cred_meth,	NULL },
+		{ "userns",	userns_meth,	userns_gc_meth },
+		{ "perfevent",	NULL,		NULL },
+		{ "ipc",	NULL,		NULL },
+		{ "msgmsg",	NULL,		NULL },
+		{ "key",	NULL,		NULL },
+		{ "bdev",	NULL,		NULL },
+	};
+	size_t i;
+	int err;
+
+	for (i = 0; i < ARRAY_SIZE(metas); i++) {
+		err = lua_api_lib_meta_install(L, metas[i].name,
+					       metas[i].meth,
+					       metas[i].gc_meth);
+		if (err)
+			return err;
+	}
+	return 0;
 }
+
+static struct lua_api_lib kernel_desc = {
+	.name		= "kernel",
+	.funcs		= kernellib,
+	.init_table	= kernel_init_table,
+	.owner		= THIS_MODULE,
+	.abi_version	= LUA_API_LIB_ABI_VERSION,
+};
+
+static int __init lua_kernel_lib_init(void)
+{
+	int err;
+
+#ifdef MODULE
+	err = lua_api_lib_register(&kernel_desc);
+#else
+	err = __lua_api_lib_register(&kernel_desc);
+#endif
+	if (err)
+		pr_err("lua-lsm: failed to register 'kernel' library: %d\n",
+		       err);
+	return err;
+}
+
+static void __exit lua_kernel_lib_exit(void)
+{
+}
+
+module_init(lua_kernel_lib_init);
+module_exit(lua_kernel_lib_exit);
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("lua-lsm kernel API library");

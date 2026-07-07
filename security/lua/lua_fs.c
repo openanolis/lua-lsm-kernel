@@ -1,19 +1,25 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Lua based LSM
+ * Lua based LSM - fs API library.
  *
  * Copyright (C) 2025 The Alibaba Cloud Linux Authors.
  */
 
+#define LUA_API_KMOD
+
 #include "debug.h"
+#include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/fs_context.h>
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/printk.h>
 #include <linux/xattr.h>
 #include <linux/binfmts.h>
 #include <linux/lua.h>
 #include <linux/lualib.h>
 #include <linux/lauxlib.h>
-#include "lsm.h"
+#include <linux/lua_lsm_api.h>
 #include "auxlib.h"
 #include "kvcache.h"
 #include "lua_object.h"
@@ -572,19 +578,62 @@ static const luaL_Reg fslib[] = {
 	{ NULL, NULL }
 };
 
-LUALIB_API int luaopen_fs(lua_State *L)
+static int fs_init_table(lua_State *L)
 {
-	luaL_newlib(L, fslib);
+	static const struct {
+		const char *name;
+		const luaL_Reg *meth;
+		const luaL_Reg *gc_meth;
+	} metas[] = {
+		{ "dentry",	fs_dentry_meth,		NULL		},
+		{ "inode",	fs_inode_meth,		NULL		},
+		{ "file",	fs_file_meth,		fs_file_gc_meth	},
+		{ "binprm",	fs_binprm_meth,		NULL		},
+		{ "path",	fs_path_meth,		NULL		},
+		{ "superblock",	fs_superblock_meth,	NULL		},
+		{ "fscontext",	fs_fscontext_meth,	NULL		},
+		{ "vfsmount",	fs_vfsmount_meth,	NULL		},
+		{ "mntidmap",	fs_mntidmap_meth,	NULL		},
+	};
+	int i, err;
 
-	create_dentry_meta(L, fs_dentry_meth, NULL);
-	create_inode_meta(L, fs_inode_meth, NULL);
-	create_file_meta(L, fs_file_meth, fs_file_gc_meth);
-	create_binprm_meta(L, fs_binprm_meth, NULL);
-	create_path_meta(L, fs_path_meth, NULL);
-	create_superblock_meta(L, fs_superblock_meth, NULL);
-	create_fscontext_meta(L, fs_fscontext_meth, NULL);
-	create_vfsmount_meta(L, fs_vfsmount_meth, NULL);
-	create_mntidmap_meta(L, fs_mntidmap_meth, NULL);
-
-	return 1;
+	for (i = 0; i < ARRAY_SIZE(metas); i++) {
+		err = lua_api_lib_meta_install(L, metas[i].name,
+					       metas[i].meth,
+					       metas[i].gc_meth);
+		if (err)
+			return err;
+	}
+	return 0;
 }
+
+static struct lua_api_lib fs_desc = {
+	.name		= "fs",
+	.funcs		= fslib,
+	.init_table	= fs_init_table,
+	.owner		= THIS_MODULE,
+	.abi_version	= LUA_API_LIB_ABI_VERSION,
+};
+
+static int __init lua_fs_lib_init(void)
+{
+	int err;
+
+#ifdef MODULE
+	err = lua_api_lib_register(&fs_desc);
+#else
+	err = __lua_api_lib_register(&fs_desc);
+#endif
+	if (err)
+		pr_err("lua-lsm: failed to register 'fs' library: %d\n", err);
+	return err;
+}
+
+static void __exit lua_fs_lib_exit(void)
+{
+}
+
+module_init(lua_fs_lib_init);
+module_exit(lua_fs_lib_exit);
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("lua-lsm fs API library");

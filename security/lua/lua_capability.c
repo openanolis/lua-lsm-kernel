@@ -1,14 +1,22 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Lua based LSM
+ * Lua based LSM - capability API library.
  *
  * Copyright (C) 2025 The Alibaba Cloud Linux Authors.
  */
 
+#define LUA_API_KMOD
+
 #include "debug.h"
 #include <linux/capability.h>
 #include <linux/cred.h>
-#include "lsm.h"
+#include <linux/errno.h>
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/printk.h>
+#include <linux/lua.h>
+#include <linux/lauxlib.h>
+#include <linux/lua_lsm_api.h>
 #include "auxlib.h"
 #include "lua_object.h"
 
@@ -162,17 +170,51 @@ static int capability_capable(lua_State *L)
 	return aux_capable(L, current_cred(), current_user_ns(), 1);
 }
 
-static const luaL_Reg capabilitylib[] = {
+static const luaL_Reg capability_lib[] = {
 	{ "cap_empty",	capability_cap_empty	},
 	{ "cap_full",	capability_cap_full	},
 	{ "capable",	capability_capable	},
 	{ NULL, NULL }
 };
 
-int luaopen_capability(lua_State *L)
+static int capability_init_table(lua_State *L)
 {
-	luaL_newlib(L, capabilitylib);
-	create_cap_meta(L, cap_meth, NULL);
+	int err = lua_api_lib_meta_install(L, "cap", cap_meth, NULL);
+
+	if (err)
+		return err;
 	setconst(L, capabilities);
-	return 1;
+	return 0;
 }
+
+static struct lua_api_lib capability_desc = {
+	.name		= "capability",
+	.funcs		= capability_lib,
+	.init_table	= capability_init_table,
+	.owner		= THIS_MODULE,
+	.abi_version	= LUA_API_LIB_ABI_VERSION,
+};
+
+static int __init lua_capability_lib_init(void)
+{
+	int err;
+
+#ifdef MODULE
+	err = lua_api_lib_register(&capability_desc);
+#else
+	err = __lua_api_lib_register(&capability_desc);
+#endif
+	if (err)
+		pr_err("lua-lsm: failed to register 'capability' library: %d\n",
+		       err);
+	return err;
+}
+
+static void __exit lua_capability_lib_exit(void)
+{
+}
+
+module_init(lua_capability_lib_init);
+module_exit(lua_capability_lib_exit);
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("lua-lsm capability API library");

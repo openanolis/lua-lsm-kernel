@@ -106,6 +106,7 @@ struct lua_lsm_module {
 };
 
 extern struct list_head lsm_modules;
+extern struct mutex modules_mutex;
 extern struct srcu_struct modules_ss;
 
 #define TABLINE							\
@@ -134,12 +135,31 @@ struct lvm_state {
 	atomic_t refcount;
 	struct lvm_state *next;
 	bool dirty;
+	unsigned int generation;
+	int init_err;
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
 	atomic64_t nalloc;
 	atomic64_t nrealloc;
 	atomic64_t nfree;
 #endif
 };
+
+/* Exposed so lib_registry.c can drain stale pools on register. */
+struct lvm_pool_cpu {
+	struct lvm_state *head;
+	unsigned int count;
+	raw_spinlock_t lock;
+};
+
+DECLARE_PER_CPU(struct lvm_state *, irq_lvms);
+DECLARE_PER_CPU(struct lvm_pool_cpu, lvm_pools);
+
+void lua_state_free(struct lvm_state *lvm);
+struct lvm_state *lvm_state_build_new(void);
+void lvm_state_free_heap(struct lvm_state *lvm);
+struct lvm_state *lvm_state_from_lua_state(lua_State *L);
+lua_State *lvm_get_from_task(const struct task_struct *task, bool exclusive);
+void lvm_put_to_task(const struct task_struct *task, lua_State *L);
 
 struct lua_lsm_task {
 	struct lvm_state *lvm;
@@ -240,14 +260,21 @@ static inline struct lua_lsm_object *lua_lsm_bdev(const struct block_device *bde
 int task_blob_init(struct task_struct *task);
 void task_blob_free(struct task_struct *task);
 
-/* lua C module */
+/* per-library API registry */
 
-int luaopen_kernel(lua_State *L);
-int luaopen_fs(lua_State *L);
-int luaopen_net(lua_State *L);
-int luaopen_errno(lua_State *L);
-int luaopen_capability(lua_State *L);
-int luaopen_signal(lua_State *L);
+struct lua_api_lib;
+
+extern bool lua_api_lib_registry_ready;
+
+/* Bumped under modules_mutex on register; pooled VMs with a stale snapshot are dropped. */
+extern atomic_t lua_api_lib_generation;
+
+int lua_api_lib_cpu_hotplug_init(void);
+int lualibs_openall_dynamic(lua_State *L);
+int lua_api_libraries_show(struct seq_file *m, void *v);
+
+/* Must run before lualibs_openall_dynamic() seeds method tables on these metatables. */
+int lib_metatables_init(lua_State *L);
 
 /* securityfs interface */
 int lua_lsm_securityfs_init(void);
