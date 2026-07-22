@@ -19,6 +19,7 @@
 
 #define CACHE_CAPACITY	1024
 
+/* UNINIT must stay 0: kzalloc'd LSM blobs skip an explicit initializer. */
 enum kvcache_dict_state {
 	KVCACHE_DICT_UNINIT,
 	KVCACHE_DICT_INITING,
