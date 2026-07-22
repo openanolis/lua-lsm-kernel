@@ -239,6 +239,16 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 		}									\
 	} while (0)
 
+/*
+ * Each hook is split into a thin wrapper (lua_lsm_##NAME) and a noinline slow
+ * path (__lua_lsm_slow_##NAME). With no policy loaded, both static branches are
+ * patched to nops, so the wrapper takes no local's address and needs no
+ * callee-saved registers: the compiler emits neither a stack frame nor a
+ * -fstack-protector canary, making the idle per-hook cost a couple of nops plus
+ * a constant return. Keeping the srcu walk, VM dispatch and inactive-object
+ * cleanup in the slow path is what avoids paying that scaffolding on every
+ * guarded syscall while Lua-LSM is dormant.
+ */
 #define LUA_LSM_DEFINEx(x, NAME, rettype, vmtype, pcalltype, failret, ...)		\
 	static inline vmtype __lua_lsm_vm_ ## NAME(lua_State *L	__VA_OPT__(,)		\
 					__MAP(x, __SC_DECL, __VA_ARGS__));		\
@@ -295,7 +305,7 @@ out:											\
 		*retp = ret;								\
 		return 0;								\
 	}										\
-	rettype lua_lsm_ ## NAME(DECL_ARGS_ ## x					\
+	static noinline rettype __lua_lsm_slow_ ## NAME(DECL_ARGS_ ## x		\
 				__MAP(x, __SC_DECL, __VA_ARGS__))			\
 	{										\
 		int ret;								\
@@ -321,6 +331,15 @@ out:											\
 		}									\
 		END_STATS(NAME);							\
 		return (rettype)ret;							\
+	}										\
+	rettype lua_lsm_ ## NAME(DECL_ARGS_ ## x					\
+				__MAP(x, __SC_DECL, __VA_ARGS__))			\
+	{										\
+		if (static_branch_unlikely(&lua_lsm_modules_active))			\
+			return __lua_lsm_slow_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));\
+		if (static_branch_unlikely(&lua_lsm_inactive_cleanup_armed))		\
+			return __lua_lsm_slow_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));\
+		return (rettype)LSM_RET_DEFAULT(NAME);					\
 	}										\
 	static inline vmtype __lua_lsm_vm_ ## NAME(lua_State *L __VA_OPT__(,)		\
 					__MAP(x, __SC_DECL, __VA_ARGS__))
