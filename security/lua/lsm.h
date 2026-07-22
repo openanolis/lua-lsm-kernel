@@ -60,6 +60,32 @@ static inline bool lua_lsm_hook_supported(unsigned int nr)
 #ifdef CONFIG_SECURITY_NETWORK_XFRM
 	case __LL_NR_xfrm_state_pol_flow_match:
 #endif
+#ifdef CONFIG_KEY_NOTIFICATIONS
+	case __LL_NR_watch_key:
+#endif
+#ifdef CONFIG_KEYS
+	case __LL_NR_key_alloc:
+	case __LL_NR_key_permission:
+	case __LL_NR_key_getsecurity:
+#endif
+#ifdef CONFIG_PERF_EVENTS
+	case __LL_NR_perf_event_open:
+	case __LL_NR_perf_event_alloc:
+	case __LL_NR_perf_event_read:
+	case __LL_NR_perf_event_write:
+#endif
+#ifdef CONFIG_SECURITY_NETWORK
+	case __LL_NR_tun_dev_alloc_security:
+	case __LL_NR_tun_dev_create:
+	case __LL_NR_tun_dev_attach_queue:
+	case __LL_NR_tun_dev_attach:
+	case __LL_NR_tun_dev_open:
+#endif
+#ifdef CONFIG_SECURITY_INFINIBAND
+	case __LL_NR_ib_pkey_access:
+	case __LL_NR_ib_endport_manage_subnet:
+	case __LL_NR_ib_alloc_security:
+#endif
 		return false;
 	default:
 		return nr < __LL_NR_MAX;
