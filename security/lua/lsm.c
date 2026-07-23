@@ -1442,7 +1442,6 @@ int task_blob_init(struct task_struct *task)
 	struct lua_lsm_task *llt = lua_lsm_task(task);
 
 	WRITE_ONCE(llt->lvm_teardown, false);
-	kvcache_dict_init(&llt->dict);
 	return 0;
 }
 
