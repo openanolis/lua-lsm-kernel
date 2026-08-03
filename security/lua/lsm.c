@@ -804,6 +804,7 @@ static const luaL_Reg builtinlibs[] = {
 	{ "errno",	luaopen_errno		},
 	{ "capability",	luaopen_capability	},
 	{ "signal",	luaopen_signal		},
+	{ "audit",	luaopen_audit		},
 	{ NULL, NULL }
 };
 

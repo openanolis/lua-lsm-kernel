@@ -274,6 +274,7 @@ int luaopen_net(lua_State *L);
 int luaopen_errno(lua_State *L);
 int luaopen_capability(lua_State *L);
 int luaopen_signal(lua_State *L);
+int luaopen_audit(lua_State *L);
 
 /* securityfs interface */
 int lua_lsm_securityfs_init(void);
