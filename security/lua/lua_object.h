@@ -138,7 +138,6 @@
 	LUA_OBJECT(func,	net,		tundev,		void *,			NULL)	\
 	LUA_OBJECT(func,	net,		socket,		struct socket *,	NULL)	\
 	LUA_OBJECT(func,	net,		skb,		struct sk_buff *,	NULL)	\
-	LUA_OBJECT(func,	net,		sockaddr,	struct sockaddr *,	NULL)	\
 	LUA_OBJECT(func,	security,	key,		struct key *,		NULL)	\
 	LUA_OBJECT(object,	block,		bdev,		struct block_device *,	NULL)	\
 	LUA_OBJECT(object,	fs,		inode,		struct inode *,		NULL)	\
@@ -157,5 +156,84 @@
 	LUA_OBJECT_ ## blob ## _DEFINE(name, ctype, d)
 LUA_OBJECTS_LIST
 #undef LUA_OBJECT
+
+/*
+ * sockaddr is defined manually because it needs to carry addrlen alongside
+ * the pointer, so Lua-side methods can derive correct bounds for AF_UNIX
+ * sun_path (including abstract namespace sockets with embedded NULs).
+ *
+ * NOTE: These definitions mirror what LUA_OBJECT_func_DEFINE would generate.
+ * If that macro is ever extended (e.g. new raw/gc helpers), update this
+ * section to stay in sync.
+ */
+struct lua_sockaddr {
+	struct sockaddr *addr;
+	int addrlen;
+};
+
+static inline struct lua_sockaddr *newsockaddr_nomain(lua_State *L)
+{
+	struct lua_sockaddr *p = lua_newuserdata(L, sizeof(*p));
+
+	p->addr = NULL;
+	p->addrlen = 0;
+	luaL_getmetatable(L, METHOD_NAME(sockaddr));
+	lua_setmetatable(L, -2);
+	return p;
+}
+
+static inline struct lua_sockaddr *newsockaddr(lua_State *L)
+{
+	struct lua_sockaddr *p = newsockaddr_nomain(L);
+
+	lua_getfield(L, LUA_REGISTRYINDEX, CURR_ENV);
+	lua_setfenv(L, -2);
+	return p;
+}
+
+static inline struct lua_sockaddr *tosockaddarp(lua_State *L, int idx)
+{
+	return (struct lua_sockaddr *)checkudata3(L, idx, METHOD_NAME(sockaddr));
+}
+
+static inline struct sockaddr *tosockaddr(lua_State *L, int idx)
+{
+	return tosockaddarp(L, idx)->addr;
+}
+
+static inline int tosockaddr_addrlen(lua_State *L, int idx)
+{
+	return tosockaddarp(L, idx)->addrlen;
+}
+
+static int rawmeth_sockaddr_type(lua_State *L)
+{
+	lua_pushstring(L, "sockaddr");
+	lua_pushboolean(L, 0);
+	return 2;
+}
+
+static int rawmeth_sockaddr_tostring(lua_State *L)
+{
+	struct sockaddr *o = tosockaddr(L, 1);
+
+	lua_pushfstring(L, "sockaddr: <%p>", o);
+	return 1;
+}
+
+static inline void create_sockaddr_meta(lua_State *L,
+			const luaL_Reg *funcs, const luaL_Reg *gc)
+{
+	static const luaL_Reg basemeths[] = {
+		{ "__tostring",	rawmeth_sockaddr_tostring	},
+		{ NULL, NULL }
+	};
+	static const luaL_Reg rawmeths[] = {
+		{ "type",		rawmeth_sockaddr_type		},
+		{ NULL, NULL }
+	};
+	createmeta3(L, "sockaddr", basemeths, METHOD_NAME_GC(sockaddr), gc,
+		METHOD_NAME(sockaddr), funcs, METHOD_NAME_RAW(sockaddr), rawmeths);
+}
 
 #endif  /* ! _SECURITY_LUA_LSM_LUA_OBJECT_H */

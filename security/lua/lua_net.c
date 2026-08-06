@@ -7,6 +7,7 @@
 
 #include "debug.h"
 #include <linux/printk.h>
+#include <linux/string.h>
 #include <linux/security.h>
 #include <linux/inet.h>
 #include <net/inet_sock.h>
@@ -68,6 +69,30 @@ static const char *family_tostring(sa_family_t sa_family)
 	}
 
 	return family;
+}
+
+static size_t sockaddr_un_path_len(const struct sockaddr_un *sunaddr, int addrlen)
+{
+	int offset = offsetof(struct sockaddr_un, sun_path);
+	size_t path_len;
+
+	if (addrlen <= offset)
+		return 0;
+
+	path_len = addrlen - offset;
+
+	/*
+	 * Pathname sockets are C strings; abstract sockets keep their full
+	 * declared length, including embedded NUL bytes.
+	 */
+	if (sunaddr->sun_path[0] != '\0') {
+		const char *nul = memchr(sunaddr->sun_path, '\0', path_len);
+
+		if (nul)
+			path_len = nul - sunaddr->sun_path;
+	}
+
+	return path_len;
 }
 
 /*********************************** sock ***********************************/
@@ -368,10 +393,15 @@ static int sockaddr_addrs(lua_State *L)
 		}
 		lua_pushinteger(L, ntohs(((struct sockaddr_in6 *)sa)->sin6_port));
 		return 3;
-	case AF_UNIX:
+	case AF_UNIX: {
+		struct sockaddr_un *sunaddr = (struct sockaddr_un *)sa;
+		int addrlen = tosockaddr_addrlen(L, 1);
+		size_t path_len = sockaddr_un_path_len(sunaddr, addrlen);
+
 		lua_pushstring(L, "unix");
-		lua_pushstring(L, ((struct sockaddr_un *)sa)->sun_path);
+		lua_pushlstring(L, sunaddr->sun_path, path_len);
 		return 2;
+	}
 	}
 	return 0;
 }
@@ -391,9 +421,16 @@ static int meth_sockaddr_tostring(lua_State *L)
 		l = snprintf(buffer, sizeof(buffer), "sa.inet6: %pISpc", sa);
 		lua_pushlstring(L, buffer, l);
 		break;
-	case AF_UNIX:
-		lua_pushfstring(L, "sa.unix: %s", ((struct sockaddr_un *)sa)->sun_path);
+	case AF_UNIX: {
+		struct sockaddr_un *sunaddr = (struct sockaddr_un *)sa;
+		int addrlen = tosockaddr_addrlen(L, 1);
+		size_t sp_len = sockaddr_un_path_len(sunaddr, addrlen);
+
+		lua_pushliteral(L, "sa.unix: ");
+		lua_pushlstring(L, sunaddr->sun_path, sp_len);
+		lua_concat(L, 2);
 		break;
+	}
 	case AF_NETLINK:
 		lua_pushfstring(L, "sa.netlink: %d", ((struct sockaddr_nl *)sa)->nl_pid);
 		break;
