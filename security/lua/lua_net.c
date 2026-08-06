@@ -8,6 +8,7 @@
 #include "debug.h"
 #include <linux/printk.h>
 #include <linux/security.h>
+#include <linux/skbuff.h>
 #include <linux/inet.h>
 #include <net/inet_sock.h>
 #include <uapi/linux/in.h>
@@ -20,6 +21,9 @@
 #include "auxlib.h"
 #include "kvcache.h"
 #include "lua_object.h"
+
+/* Upper bound of a single skb:read(), sized to stay on the kernel stack. */
+#define SKB_READ_MAX	256
 
 static const char *family_tostring(sa_family_t sa_family)
 {
@@ -206,9 +210,18 @@ SOCK_BOOL_DEF(udp)
 SOCK_BOOL_DEF(stream_unix)
 SOCK_BOOL_DEF(vsock)
 
+static int net_sock_proto(lua_State *L)
+{
+	struct sock *sk = tosock(L, 1);
+
+	lua_pushinteger(L, (lua_Integer)sk->sk_protocol);
+	return 1;
+}
+
 static const luaL_Reg sock_meth[] = {
 	{ "socket",		net_sock_socket		},
 	{ "suites",		net_sock_suites		},
+	{ "proto",		net_sock_proto		},
 	{ "listener",		net_sock_listener	},
 	{ "is_inet",		net_sock_is_inet	},
 	{ "is_tcp",		net_sock_is_tcp		},
@@ -256,16 +269,11 @@ static const luaL_Reg socket_meth[] = {
 
 /********************************** sk_buff *********************************/
 
+/*
+ * A request or time-wait sk lacks the fields the sock accessors read, and the
+ * garbage passes for a valid protocol number, so the policy fails open.
+ */
 static int net_skb_sock(lua_State *L)
-{
-	struct sk_buff *skb = toskb(L, 1);
-	struct sock *sk = skb->sk;
-
-	sk ? *newsock(L) = sk : lua_pushnil(L);
-	return 1;
-}
-
-static int net_skb_full_sk(lua_State *L)
 {
 	struct sk_buff *skb = toskb(L, 1);
 	struct sock *sk = skb_to_full_sk(skb);
@@ -316,12 +324,48 @@ static int net_skb_secmark(lua_State *L)
 	return 1;
 }
 
+static int net_skb_read_bounded(struct sk_buff *skb, lua_Integer offset,
+				void *dst, unsigned int size)
+{
+	if (offset < 0 || offset > (lua_Integer)skb->len)
+		return -EINVAL;
+	if (size > skb->len - (u32)offset)
+		return -EINVAL;
+	if (skb_copy_bits(skb, (int)offset, dst, (int)size))
+		return -EFAULT;
+	return 0;
+}
+
+static int net_skb_len(lua_State *L)
+{
+	struct sk_buff *skb = toskb(L, 1);
+
+	lua_pushinteger(L, (lua_Integer)skb->len);
+	return 1;
+}
+
+static int net_skb_read(lua_State *L)
+{
+	struct sk_buff *skb = toskb(L, 1);
+	lua_Integer offset = luaL_checkinteger(L, 2);
+	lua_Integer length = luaL_checkinteger(L, 3);
+	char buffer[SKB_READ_MAX];
+
+	if (length < 0 || length > SKB_READ_MAX ||
+	    net_skb_read_bounded(skb, offset, buffer, (unsigned int)length))
+		lua_pushnil(L);
+	else
+		lua_pushlstring(L, buffer, (size_t)length);
+	return 1;
+}
+
 static const luaL_Reg skb_meth[] = {
 	{ "sock",	net_skb_sock		},
-	{ "full_sk",	net_skb_full_sk		},
 	{ "protocol",	net_skb_protocol	},
 	{ "iif",	net_skb_iif		},
 	{ "secmark",	net_skb_secmark		},
+	{ "len",	net_skb_len		},
+	{ "read",	net_skb_read		},
 	{ NULL, NULL }
 };
 
