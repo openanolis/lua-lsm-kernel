@@ -556,6 +556,30 @@ void kvcache_dict_init(struct kvcache_dict *dict)
 	atomic_set_release(&dict->state, KVCACHE_DICT_READY);
 }
 
+static void lua_lsm_shdict_free_rcu(struct rcu_head *head)
+{
+	struct lua_lsm_module_shdict *shdict;
+
+	shdict = container_of(head, struct lua_lsm_module_shdict, rcu);
+	kvcache_dict_free(&shdict->dict);
+	kfree(shdict);
+}
+
+void lua_lsm_shdict_get(struct lua_lsm_module_shdict *shdict)
+{
+	if (shdict)
+		refcount_acquire(&shdict->refcount);
+}
+
+void lua_lsm_shdict_put(struct lua_lsm_module_shdict *shdict)
+{
+	if (!shdict)
+		return;
+
+	if (refcount_release(&shdict->refcount) == 0)
+		call_rcu(&shdict->rcu, lua_lsm_shdict_free_rcu);
+}
+
 /******************************** object cache *******************************/
 
 const int _module_sentinel;
@@ -674,28 +698,37 @@ int lua_object_newindex(lua_State *L, struct kvcache_dict *dict)
 
 static int shdict_set(lua_State *L)
 {
-	struct kvcache_dict *shdict = toshdict(L, 1);
+	struct lua_lsm_module_shdict *shdict = toshdict(L, 1);
 
-	return kvcache_set(L, shdict, NULL);
+	if (READ_ONCE(shdict->dead))
+		return kvcache_result(L, -ESRCH);
+
+	return kvcache_set(L, &shdict->dict, NULL);
 }
 
 static int shdict_get(lua_State *L)
 {
-	struct kvcache_dict *shdict = toshdict(L, 1);
+	struct lua_lsm_module_shdict *shdict = toshdict(L, 1);
 
-	return kvcache_get(L, shdict, NULL);
+	if (READ_ONCE(shdict->dead))
+		return kvcache_result(L, -ESRCH);
+
+	return kvcache_get(L, &shdict->dict, NULL);
 }
 
 static int shdict_incr(lua_State *L)
 {
-	struct kvcache_dict *shdict = toshdict(L, 1);
+	struct lua_lsm_module_shdict *shdict = toshdict(L, 1);
 
-	return kvcache_incr(L, shdict, NULL);
+	if (READ_ONCE(shdict->dead))
+		return kvcache_result(L, -ESRCH);
+
+	return kvcache_incr(L, &shdict->dict, NULL);
 }
 
 static int shdict_index(lua_State *L)
 {
-	struct kvcache_dict *shdict = toshdict(L, 1);
+	struct lua_lsm_module_shdict *shdict = toshdict(L, 1);
 
 	/* metatable[key] */
 	if (lua_getmetatable(L, 1) == 0) {
@@ -707,24 +740,33 @@ static int shdict_index(lua_State *L)
 	if (!lua_isnoneornil(L, -1))
 		return 1;
 
-	return kvcache_get(L, shdict, NULL);
+	if (READ_ONCE(shdict->dead))
+		return kvcache_result(L, -ESRCH);
+
+	return kvcache_get(L, &shdict->dict, NULL);
 }
 
 static int shdict_tostring(lua_State *L)
 {
-	struct kvcache_dict *shdict = toshdict(L, 1);
+	struct lua_lsm_module_shdict *shdict = toshdict(L, 1);
 	unsigned long flags;
 
-	read_lock_irqsave(&shdict->lock, flags);
+	if (READ_ONCE(shdict->dead)) {
+		lua_pushliteral(L, "shdict (dead)");
+		return 1;
+	}
+
+	read_lock_irqsave(&shdict->dict.lock, flags);
 	lua_pushfstring(L, "shdict (%d / %d)",
-			atomic_read(&shdict->count), shdict->capacity);
-	read_unlock_irqrestore(&shdict->lock, flags);
+			atomic_read(&shdict->dict.count),
+			shdict->dict.capacity);
+	read_unlock_irqrestore(&shdict->dict.lock, flags);
 	return 1;
 }
 
 static int shdict_gc(lua_State *L)
 {
-	__log_info_ratelimited("shdict already freed by unregister\n");
+	lua_lsm_shdict_put(toshdict(L, 1));
 	return 0;
 }
 

@@ -275,7 +275,7 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 					srcu_read_lock_held(&modules_ss)) {		\
 			if (!__BITMAP_ISSET(__LL_NR_ ## NAME, &module->hookfuncs))	\
 				continue;						\
-			if (module->state != LMS_STATE_LIVE)				\
+			if (READ_ONCE(module->state) != LMS_STATE_LIVE)			\
 				continue;						\
 			lua_getfield(L, -1, module->name);				\
 			lua_getfield(L, -1, #NAME);					\
