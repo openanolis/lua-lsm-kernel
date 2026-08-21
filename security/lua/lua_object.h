@@ -143,6 +143,7 @@
 	LUA_OBJECT(object,	block,		bdev,		struct block_device *,	NULL)	\
 	LUA_OBJECT(object,	fs,		inode,		struct inode *,		NULL)	\
 	LUA_OBJECT(object,	fs,		file,		struct file *,		NULL)	\
+	LUA_OBJECT(object,	fs,		backingfile,	struct file *,		NULL)	\
 	LUA_OBJECT(object,	fs,		superblock,	struct super_block *,	NULL)	\
 	LUA_OBJECT(func,	fs,		dentry,		struct dentry *,	NULL)	\
 	LUA_OBJECT(func,	fs,		binprm,		struct linux_binprm *,	NULL)	\

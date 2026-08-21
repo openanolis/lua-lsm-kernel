@@ -198,6 +198,11 @@ static inline struct lua_lsm_object *lua_lsm_file(const struct file *file)
 	return file->f_security + lua_lsm_blob_sizes.lbs_file;
 }
 
+static inline struct lua_lsm_object *lua_lsm_backingfile(const struct file *backing_file)
+{
+	return backing_file_security(backing_file) + lua_lsm_blob_sizes.lbs_backing_file;
+}
+
 static inline struct lua_lsm_object *lua_lsm_ib(void *ib_sec)
 {
 	return ib_sec + lua_lsm_blob_sizes.lbs_ib;

@@ -1488,6 +1488,7 @@ struct lsm_blob_sizes lua_lsm_blob_sizes __ro_after_init = {
 	.lbs_task = sizeof(struct lua_lsm_task),
 	.lbs_cred = sizeof(struct lua_lsm_object),
 	.lbs_file = sizeof(struct lua_lsm_object),
+	.lbs_backing_file = sizeof(struct lua_lsm_object),
 	.lbs_ib = 0,
 	.lbs_inode = sizeof(struct lua_lsm_object),
 	.lbs_sock = sizeof(struct lua_lsm_object),

@@ -1406,7 +1406,7 @@ LUA_LSM_INT_DEFINE5(inode_setsecurity, struct inode *, inode,
  * Default: 0
  */
 LUA_LSM_INT_NAKED_DEFINE3(inode_listsecurity, struct inode *, inode,
-		char *, buffer, size_t, buffer_size)
+		char **, buffer, ssize_t *, remaining_size)
 {
 	int top = lua_gettop(L);
 	int ret = LSM_RET_DEFAULT(inode_listsecurity);
@@ -1436,9 +1436,7 @@ LUA_LSM_INT_NAKED_DEFINE3(inode_listsecurity, struct inode *, inode,
 			} else if (tt == LUA_TSTRING) {
 				size_t len;
 				const char *v = lua_tolstring(L, top, &len);
-				ret = (int)len;
-				if (buffer != NULL && len <= buffer_size)
-					memcpy(buffer, v, len);
+				return xattr_list_one(buffer, remaining_size, v);
 			}
 			break;
 		default:
@@ -1572,6 +1570,51 @@ LUA_LSM_VOID_DEFINE1(file_free_security, struct file *, file)
 }
 
 /**
+ * backing_file_alloc - prepare
+ */
+LUA_LSM_PREPARE_DEFINE2(backing_file_alloc, struct file *, backing_file,
+	 const struct file *, user_file)
+{
+	if (!lua_lsm_backingfile(backing_file))
+		return -EINVAL;
+
+	return 0;
+}
+
+/**
+ * backing_file_alloc
+ * Default: 0
+ */
+LUA_LSM_INT_DEFINE2(backing_file_alloc, struct file *, backing_file,
+	 const struct file *, user_file)
+{
+    *newrawbackingfile(L) = backing_file;
+    *(const struct file **)newfile(L) = user_file;
+}
+
+/**
+ * backing_file_free - postpone
+ */
+LUA_LSM_POSTPONE_DEFINE1(backing_file_free, struct file *, backing_file)
+{
+	struct lua_lsm_object *llo = lua_lsm_backingfile(backing_file);
+
+	if (!llo)
+		return;
+
+	kvcache_dict_free(&llo->dict);
+}
+
+/**
+ * backing_file_free
+ * Default: LSM_RET_VOID
+ */
+LUA_LSM_VOID_DEFINE1(backing_file_free, struct file *, backing_file)
+{
+    *newrawbackingfile(L) = backing_file;
+}
+
+/**
  * file_ioctl
  * Default: 0
  */
@@ -1615,6 +1658,18 @@ LUA_LSM_INT_DEFINE4(mmap_file, struct file *, file, unsigned long, reqprot,
 	lua_pushnumber(L, (lua_Number)reqprot);
 	lua_pushnumber(L, (lua_Number)prot);
 	lua_pushnumber(L, (lua_Number)flags);
+}
+
+/**
+ * mmap_backing_file
+ * Default: 0
+ */
+LUA_LSM_INT_DEFINE3(mmap_backing_file, struct vm_area_struct *, vma,
+	 struct file *, backing_file, struct file *, user_file)
+{
+	lua_pushnil(L);	/* TODO: vma */
+    *newbackingfile(L) = backing_file;
+	*newfile(L) = user_file;
 }
 
 /**
@@ -2653,6 +2708,22 @@ LUA_LSM_INT_DEFINE1(watch_key, struct key *, key)
 }
 
 #endif /* CONFIG_SECURITY && CONFIG_KEY_NOTIFICATIONS */
+
+#if defined(CONFIG_SECURITY_NETWORK) && defined(CONFIG_SECURITY_PATH)
+
+/**
+ * unix_find
+ * Default: 0
+ */
+LUA_LSM_INT_DEFINE3(unix_find, const struct path *, path, struct sock *, other,
+	 int, flags)
+{
+	*(const struct path **)newpath(L) = path;
+	*newsock(L) = other;
+	lua_pushinteger(L, (lua_Integer)flags);
+}
+
+#endif /* CONFIG_SECURITY_NETWORK && CONFIG_SECURITY_PATH */
 
 #ifdef CONFIG_SECURITY_NETWORK
 

@@ -234,7 +234,7 @@ static int meth_inode_tostring(lua_State *L)
 {
 	struct inode *inode = toinode(L, 1);
 	char buffer[128];
-	int l = snprintf(buffer, sizeof(buffer), "inode: [%lu]", inode->i_ino);
+	int l = snprintf(buffer, sizeof(buffer), "inode: [%llu]", inode->i_ino);
 
 	lua_pushlstring(L, buffer, l);
 	return 1;
