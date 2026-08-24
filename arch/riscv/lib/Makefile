@@ -12,6 +12,7 @@ lib-y			+= strchr.o
 lib-y			+= strrchr.o
 endif
 lib-y			+= csum.o
+obj-$(CONFIG_ARCH_SETJMP) += setjmp.o
 ifeq ($(CONFIG_MMU), y)
 lib-$(CONFIG_RISCV_ISA_V)	+= uaccess_vector.o
 endif
