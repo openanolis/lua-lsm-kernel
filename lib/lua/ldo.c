@@ -5,6 +5,7 @@
 */
 
 
+#include <linux/ftrace.h>
 #include <linux/setjmp.h>
 #include <linux/panic.h>
 #include <linux/string.h>
@@ -113,9 +114,12 @@ int luaD_rawrunprotected (lua_State *L, Pfunc f, void *ud) {
   lj.status = 0;
   lj.previous = L->errorJmp;  /* chain new error handler */
   L->errorJmp = &lj;
+  /* A longjmp can bypass the return hooks of functions called below. */
+  pause_graph_tracing();
   LUAI_TRY(L, &lj,
     (*f)(L, ud);
   );
+  unpause_graph_tracing();
   L->errorJmp = lj.previous;  /* restore old error handler */
   return lj.status;
 }
