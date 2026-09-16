@@ -30,6 +30,18 @@ config RISCV_MODULE_LINKING_KUNIT
 
          If unsure, say N.
 
+config RISCV_SETJMP_KUNIT_TEST
+	tristate "KUnit test for RISC-V setjmp and longjmp" if !KUNIT_ALL_TESTS
+	depends on KUNIT
+	select ARCH_SETJMP
+	default KUNIT_ALL_TESTS
+	help
+	  Enable tests for the RISC-V setjmp() and longjmp() implementation.
+	  The tests verify the initial return, zero and nonzero jump values, and
+	  restoration across several nested call frames.
+
+	  If unsure, say N.
+
 config RISCV_KPROBES_KUNIT
        tristate "KUnit test for riscv kprobes" if !KUNIT_ALL_TESTS
        depends on KUNIT
