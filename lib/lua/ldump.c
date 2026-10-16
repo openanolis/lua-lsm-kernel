@@ -13,12 +13,16 @@
 #include "lstate.h"
 #include "lundump.h"
 
+/* Initially 65 like the matcher; pending separate dump measurements. */
+#define LUA_DUMP_MAXDEPTH 65
+
 typedef struct {
  lua_State* L;
  lua_Writer writer;
  void* data;
  int strip;
  int status;
+ int depth;
 } DumpState;
 
 #define DumpMem(b,n,size,D)	DumpBlock(b,(n)*(size),D)
@@ -79,7 +83,7 @@ static void DumpConstants(const Proto* f, DumpState* D)
 {
  int i,n=f->sizek;
  DumpInt(n,D);
- for (i=0; i<n; i++)
+ for (i=0; i<n && D->status==0; i++)
  {
   const TValue* o=&f->k[i];
   DumpChar(ttype(o),D);
@@ -103,7 +107,7 @@ static void DumpConstants(const Proto* f, DumpState* D)
  }
  n=f->sizep;
  DumpInt(n,D);
- for (i=0; i<n; i++) DumpFunction(f->p[i],f->source,D);
+ for (i=0; i<n && D->status==0; i++) DumpFunction(f->p[i],f->source,D);
 }
 
 static void DumpDebug(const Proto* f, DumpState* D)
@@ -113,7 +117,7 @@ static void DumpDebug(const Proto* f, DumpState* D)
  DumpVector(f->lineinfo,n,sizeof(int),D);
  n= (D->strip) ? 0 : f->sizelocvars;
  DumpInt(n,D);
- for (i=0; i<n; i++)
+ for (i=0; i<n && D->status==0; i++)
  {
   DumpString(f->locvars[i].varname,D);
   DumpInt(f->locvars[i].startpc,D);
@@ -121,11 +125,18 @@ static void DumpDebug(const Proto* f, DumpState* D)
  }
  n= (D->strip) ? 0 : f->sizeupvalues;
  DumpInt(n,D);
- for (i=0; i<n; i++) DumpString(f->upvalues[i],D);
+ for (i=0; i<n && D->status==0; i++) DumpString(f->upvalues[i],D);
 }
 
 static void DumpFunction(const Proto* f, const TString* p, DumpState* D)
 {
+ if (D->status!=0) return;
+ if (D->depth==LUA_DUMP_MAXDEPTH)
+ {
+  D->status=1;
+  return;
+ }
+ D->depth++;
  DumpString((f->source==p || D->strip) ? NULL : f->source,D);
  DumpInt(f->linedefined,D);
  DumpInt(f->lastlinedefined,D);
@@ -135,7 +146,8 @@ static void DumpFunction(const Proto* f, const TString* p, DumpState* D)
  DumpChar(f->maxstacksize,D);
  DumpCode(f,D);
  DumpConstants(f,D);
- DumpDebug(f,D);
+ if (D->status==0) DumpDebug(f,D);
+ D->depth--;
 }
 
 static void DumpHeader(DumpState* D)
@@ -156,6 +168,7 @@ int luaU_dump (lua_State* L, const Proto* f, lua_Writer w, void* data, int strip
  D.data=data;
  D.strip=strip;
  D.status=0;
+ D.depth=0;
  DumpHeader(&D);
  DumpFunction(f,NULL,&D);
  return D.status;
