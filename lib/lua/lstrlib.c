@@ -736,7 +736,7 @@ static const char *scanformat (lua_State *L, const char *strfrmt, char *form) {
   if (isdigit(uchar(*p)))
     luaL_error(L, "invalid format (width or precision too long)");
   *(form++) = '%';
-  strscpy(form, strfrmt, p - strfrmt + 1);
+  memcpy(form, strfrmt, p - strfrmt + 1);
   form += p - strfrmt + 1;
   *form = '\0';
   return p;
