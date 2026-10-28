@@ -1,0 +1,7 @@
+/shdict_lifecycle
+/shdict_bench
+/shdict_shared_fd
+/shdict_boundary
+/shdict_fault
+/shdict_manage_bench
+/shdict_snapshot
