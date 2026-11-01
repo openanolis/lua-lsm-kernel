@@ -4,7 +4,8 @@
 
 #include <linux/types.h>
 
-#define LUA_STRING_WORK_LIMIT 65536ULL
+/* Cover selected full 64 KiB checks and conversions, plus headroom. */
+#define LUA_STRING_WORK_LIMIT 1600000ULL
 
 typedef struct StrWorkBudget {
   u64 remaining;
