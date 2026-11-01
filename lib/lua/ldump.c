@@ -13,8 +13,8 @@
 #include "lstate.h"
 #include "lundump.h"
 
-/* Initially 65 like the matcher; pending separate dump measurements. */
-#define LUA_DUMP_MAXDEPTH 65
+/* Bound recursive prototype traversal; the exported root counts as one level. */
+#define LUA_DUMP_MAXDEPTH 32
 
 typedef struct {
  lua_State* L;
