@@ -10,6 +10,7 @@
 
 #include "lsm.h"
 #include "lua_object.h"
+#include <linux/lualib.h>
 
 
 #define LSM_RET_DEFAULT(NAME)	(NAME##_default)
@@ -72,9 +73,9 @@
 #define ASSIGN_FROM_FUNC_void(ret)
 #define ASSIGN_FROM_FUNC_int(ret)	ret =
 
-#define PCALL_RES_void(L, top, ret)	do {} while (0)
+#define CALL_RES_void(L, top, ret)	do {} while (0)
 
-static inline void lua_lsm_pcall_res_errno(lua_State *L, int idx, int *retp)
+static inline void lua_lsm_result_errno(lua_State *L, int idx, int *retp)
 {
 	int errnum = lua_tointeger(L, idx);
 
@@ -91,7 +92,7 @@ static inline void lua_lsm_pcall_res_errno(lua_State *L, int idx, int *retp)
  *   false, errno : -errno
  *   nil, errno   : -errno
  */
-static inline void lua_lsm_pcall_res_int(lua_State *L, int top, int *retp)
+static inline void lua_lsm_result_int(lua_State *L, int top, int *retp)
 {
 	int nres = lua_gettop(L) - top + 1;
 
@@ -105,13 +106,13 @@ static inline void lua_lsm_pcall_res_int(lua_State *L, int top, int *retp)
 		break;
 	default:
 		if (!lua_toboolean(L, top))
-			lua_lsm_pcall_res_errno(L, top + 1, retp);
+			lua_lsm_result_errno(L, top + 1, retp);
 		break;
 	}
 	lua_pop(L, nres);
 }
 
-static inline void lua_lsm_pcall_res_bool(lua_State *L, int top, int *retp)
+static inline void lua_lsm_result_bool(lua_State *L, int top, int *retp)
 {
 	int nres = lua_gettop(L) - top + 1;
 
@@ -120,7 +121,7 @@ static inline void lua_lsm_pcall_res_bool(lua_State *L, int top, int *retp)
 	lua_pop(L, nres);
 }
 
-static inline void lua_lsm_pcall_res_boolerr(lua_State *L, int top, int *retp)
+static inline void lua_lsm_result_boolerr(lua_State *L, int top, int *retp)
 {
 	int nres = lua_gettop(L) - top + 1;
 	int tt;
@@ -139,42 +140,35 @@ static inline void lua_lsm_pcall_res_boolerr(lua_State *L, int top, int *retp)
 			if (lua_toboolean(L, top))
 				*retp = 1;
 			else
-				lua_lsm_pcall_res_errno(L, top + 1, retp);
+				lua_lsm_result_errno(L, top + 1, retp);
 		} else if (tt == LUA_TNIL) {
-			lua_lsm_pcall_res_errno(L, top + 1, retp);
+			lua_lsm_result_errno(L, top + 1, retp);
 		}
 		break;
 	}
 	lua_pop(L, nres);
 }
 
-#define PCALL_RES_int(L, top, ret)	lua_lsm_pcall_res_int(L, top, &(ret))
-#define PCALL_RES_bool(L, top, ret)	lua_lsm_pcall_res_bool(L, top, &(ret))
-#define PCALL_RES_boolerr(L, top, ret)	lua_lsm_pcall_res_boolerr(L, top, &(ret))
+#define CALL_RES_int(L, top, ret)	lua_lsm_result_int(L, top, &(ret))
+#define CALL_RES_bool(L, top, ret)	lua_lsm_result_bool(L, top, &(ret))
+#define CALL_RES_boolerr(L, top, ret)	lua_lsm_result_boolerr(L, top, &(ret))
 
 #define LCALL_NRES_void		0
 #define LCALL_NRES_int		LUA_MULTRET
 #define LCALL_NRES_bool		LUA_MULTRET
 #define LCALL_NRES_boolerr	LUA_MULTRET
 
-#define LUA_PCALL(rettype, L, top, ret)							\
+/* All Lua work, including result conversion, runs inside lua_cpcall. */
+#define LUA_CALL(rettype, L, top, ret)							\
 	do {										\
-		int status, nargs = lua_gettop(L) - top;				\
-		lua_pushvalue(L, -nargs - 4);		/* env */			\
+		int nargs = lua_gettop(L) - top;				\
+		lua_pushvalue(L, -nargs - 4);		/* env */		\
 		lua_setfenv(L, -nargs - 6);		/* restore thread.env */	\
-		status = lua_pcall(L, nargs, LCALL_NRES_ ## rettype, -nargs - 6);	\
-		if (status != 0) {							\
-			const char * __maybe_unused error = lua_tostring(L, -1);	\
-			__log_err("pcall: status = %d, top = %d, %s\n",			\
-				status, lua_gettop(L), error);				\
-			lua_pop(L, 1);							\
-		} else {								\
-			PCALL_RES_ ## rettype(L, top, ret);				\
-		}									\
+		lua_call(L, nargs, LCALL_NRES_ ## rettype);			\
+		CALL_RES_ ## rettype(L, top, ret);				\
 	} while (0)
 
-
-#define END_VM_CALL_void(rettype, L, top, ret)	LUA_PCALL(rettype, L, top, ret)
+#define END_VM_CALL_void(rettype, L, top, ret)	LUA_CALL(rettype, L, top, ret)
 #define END_VM_CALL_int(rettype, L, top, ret)	lua_settop(L, (top) - 1)
 
 #define RET_CHECK_void(NAME, ret)	do {} while (0)
@@ -186,20 +180,70 @@ static inline void lua_lsm_pcall_res_boolerr(lua_State *L, int top, int *retp)
 #define RET_CHECK_bool(NAME, ret)	RET_CHECK_int(NAME, ret)
 #define RET_CHECK_boolerr(NAME, ret)	RET_CHECK_int(NAME, ret)
 
-static inline int lua_lsm_dispatch_failret_default(int default_ret)
+/* Boolean hooks cannot carry errno: use each caller's predicate contract. */
+static inline int lua_lsm_dispatch_failret_bool(unsigned int nr)
 {
-	return default_ret;
+	switch (nr) {
+	case __LL_NR_ismaclabel:
+		return 1; /* Keep an unclassified security xattr out of generic lists. */
+	default:
+		/* No capability exemption, no known audit field, no flow match. */
+		return 0;
+	}
 }
 
-static inline int lua_lsm_dispatch_failret_errno(int default_ret __maybe_unused)
+#define LUA_LSM_DISPATCH_FAILRET_DEFAULT(NAME, err) LSM_RET_DEFAULT(NAME)
+#define LUA_LSM_DISPATCH_FAILRET_ERRNO(NAME, err) (err)
+#define LUA_LSM_DISPATCH_FAILRET_BOOL(NAME, err) \
+	lua_lsm_dispatch_failret_bool(__LL_NR_ ## NAME)
+
+/*
+ * Root the original thread environment and registry key before entering the
+ * protected call. CURR_ENV is a lightuserdata key with a permanent false entry
+ * when idle: saving/restoring it cannot allocate, run GC or invoke policy code.
+ * lua_cpcall also protects allocation of its own C closure and call frame.
+ */
+static inline int lua_lsm_dispatch(lua_State *L, lua_CFunction dispatch,
+				   void *args, const char *hook)
 {
-	return -ENOMEM;
+	int top = lua_gettop(L);
+	lua_Hook oldhook = lua_gethook(L);
+	int oldmask = lua_gethookmask(L);
+	int oldcount = lua_gethookcount(L);
+	int status;
+
+	lua_pushthread(L);
+	lua_getfenv(L, -1);
+	lua_pushlightuserdata(L, CURR_ENV);
+	lua_pushvalue(L, -1);
+	lua_rawget(L, LUA_REGISTRYINDEX);
+	status = lua_cpcall(L, dispatch, args);
+	lua_resetdebughook(L);
+	lua_sethook(L, oldhook, oldmask, oldcount);
+	lua_pushvalue(L, top + 3);
+	lua_pushvalue(L, top + 4);
+	lua_rawset(L, LUA_REGISTRYINDEX);
+	lua_pushvalue(L, top + 2);
+	lua_setfenv(L, top + 1);
+	lua_settop(L, top);
+	if (!status)
+		return 0;
+
+	/* The decision never depends on the error object's type or contents. */
+	pr_err_ratelimited("hook %s failed: Lua status %d\n", hook, status);
+	return status == LUA_ERRMEM ? -ENOMEM : -EIO;
 }
 
-#define LUA_LSM_DISPATCH_FAILRET_DEFAULT(NAME)			\
-	lua_lsm_dispatch_failret_default(LSM_RET_DEFAULT(NAME))
-#define LUA_LSM_DISPATCH_FAILRET_ERRNO(NAME)			\
-	lua_lsm_dispatch_failret_errno(LSM_RET_DEFAULT(NAME))
+/* __MAP uses commas; context members need a separator-free variant. */
+#define __LUA_FIELDS0()
+#define __LUA_FIELDS1(t, a) t a;
+#define __LUA_FIELDS2(t, a, ...) t a; __LUA_FIELDS1(__VA_ARGS__)
+#define __LUA_FIELDS3(t, a, ...) t a; __LUA_FIELDS2(__VA_ARGS__)
+#define __LUA_FIELDS4(t, a, ...) t a; __LUA_FIELDS3(__VA_ARGS__)
+#define __LUA_FIELDS5(t, a, ...) t a; __LUA_FIELDS4(__VA_ARGS__)
+#define __LUA_FIELDS6(t, a, ...) t a; __LUA_FIELDS5(__VA_ARGS__)
+#define __LUA_INIT(t, a) .a = a
+#define __LUA_ARG(t, a) args->a
 
 static inline bool lua_lsm_hook_active(unsigned int nr)
 {
@@ -252,25 +296,21 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 #define LUA_LSM_DEFINEx(x, NAME, rettype, vmtype, pcalltype, failret, ...)		\
 	static inline vmtype __lua_lsm_vm_ ## NAME(lua_State *L	__VA_OPT__(,)		\
 					__MAP(x, __SC_DECL, __VA_ARGS__));		\
-	static inline int __lua_lsm_ ## NAME(DECL_RETP_ARGS_ ## x			\
-					__MAP(x, __SC_DECL, __VA_ARGS__))		\
+	struct __lua_lsm_args_ ## NAME {						\
+		int ret;								\
+		__LUA_FIELDS ## x(__VA_ARGS__)					\
+	};										\
+	static int __lua_lsm_dispatch_ ## NAME(lua_State *L)			\
 	{										\
+		struct __lua_lsm_args_ ## NAME *args = lua_touserdata(L, 1);	\
 		struct lua_lsm_module *module;						\
-		lua_State *L;								\
 		int ret = LSM_RET_DEFAULT(NAME);					\
-		if (!lua_lsm_hook_active(__LL_NR_ ## NAME))				\
-			goto out;							\
-		L = lvm_get();								\
-		if (!L) {								\
-			if (lvm_current_task_teardown())				\
-				goto out;						\
-			return -ENOMEM;							\
-		}									\
-		lua_pushcfunction(L, lua_traceback);					\
+		lua_settop(L, 0);							\
+		lua_pushnil(L);			/* reserved slot */			\
 		lua_pushthread(L);							\
 		lua_getfenv(L, -1);			/* save thread.fenv */		\
 		lua_getfield(L, LUA_REGISTRYINDEX, "_MODULES");				\
-		/* stack: [traceback, thread, env, _MODULES] */				\
+		/* stack: [reserved, thread, env, _MODULES] */				\
 		list_for_each_entry_srcu(module, &lsm_modules, list,			\
 					srcu_read_lock_held(&modules_ss)) {		\
 			if (!__BITMAP_ISSET(__LL_NR_ ## NAME, &module->hookfuncs))	\
@@ -280,30 +320,50 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 			lua_getfield(L, -1, module->name);				\
 			lua_getfield(L, -1, #NAME);					\
 			WARN_ON(lua_gettop(L) != 6);					\
-			/* stack: [traceback, thread, env, _MODULES, _M, lfunc] */	\
+			/* stack: [reserved, thread, env, _MODULES, _M, lfunc] */	\
 			if (lua_isfunction(L, -1)) {					\
 				int top = lua_gettop(L);				\
 				lua_getfenv(L, -1);					\
 				*newtask_nomain(L) = current;				\
 				lua_setfield(L, -2, "current");				\
-				lua_setfield(L, LUA_REGISTRYINDEX, CURR_ENV);		\
+				lua_lsm_set_current_env(L);				\
 				ASSIGN_FROM_FUNC_ ## vmtype(ret)			\
 					__lua_lsm_vm_ ## NAME(L __VA_OPT__(,)		\
-						__MAP(x, __SC_ARGS, __VA_ARGS__));	\
+						__MAP(x, __LUA_ARG, __VA_ARGS__));	\
 				END_VM_CALL_ ## vmtype(pcalltype, L, top, ret);		\
 			} else {							\
-				lua_pop(L, 1);		/* pop lfunc */			\
+				return luaL_error(L, "hook '%s' is not a function", #NAME);\
 			}								\
 			lua_pop(L, 1);			/* pop _M */			\
 			RET_CHECK_ ## pcalltype(NAME, ret);				\
 		}									\
-		lua_pushnil(L);								\
-		lua_setfield(L, LUA_REGISTRYINDEX, CURR_ENV);				\
-		lua_pop(L, 4);								\
+		args->ret = ret;							\
+		return 0;								\
+	}										\
+	static inline int __lua_lsm_ ## NAME(DECL_RETP_ARGS_ ## x			\
+					__MAP(x, __SC_DECL, __VA_ARGS__))		\
+	{										\
+		struct __lua_lsm_args_ ## NAME args = {				\
+			.ret = LSM_RET_DEFAULT(NAME),				\
+			__MAP(x, __LUA_INIT, __VA_ARGS__)				\
+		};									\
+		lua_State *L;								\
+		int err = 0;								\
+		if (!lua_lsm_hook_active(__LL_NR_ ## NAME))				\
+			goto out;							\
+		L = lvm_get();								\
+		if (!L) {								\
+			if (!lvm_current_task_teardown()) {				\
+				err = -ENOMEM;						\
+				pr_err_ratelimited("hook %s failed: VM unavailable\n", #NAME);\
+			}								\
+			goto out;							\
+		}									\
+		err = lua_lsm_dispatch(L, __lua_lsm_dispatch_ ## NAME, &args, #NAME);\
 		lvm_put(L);								\
 out:											\
-		*retp = ret;								\
-		return 0;								\
+		*retp = args.ret;							\
+		return err;								\
 	}										\
 	static noinline rettype __lua_lsm_slow_ ## NAME(DECL_ARGS_ ## x		\
 				__MAP(x, __SC_DECL, __VA_ARGS__))			\
@@ -322,7 +382,7 @@ out:											\
 				int err = __lua_lsm_ ## NAME(CALL_RETP_ARGS_ ## x	\
 					__MAP(x, __SC_ARGS, __VA_ARGS__));		\
 				if (err)						\
-					ret = LUA_LSM_DISPATCH_FAILRET_ ## failret(NAME);\
+					ret = LUA_LSM_DISPATCH_FAILRET_ ## failret(NAME, err);\
 			} else {							\
 				ret = LSM_RET_DEFAULT(NAME);				\
 			}								\
@@ -392,19 +452,19 @@ out:											\
 	LUA_LSM_DEFINEx(6, name, int, void, int, ERRNO, ##__VA_ARGS__)
 
 #define LUA_LSM_INT_BOOL_DEFINE0(name, ...)				\
-	LUA_LSM_DEFINEx(0, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+	LUA_LSM_DEFINEx(0, name, int, void, bool, BOOL, ##__VA_ARGS__)
 #define LUA_LSM_INT_BOOL_DEFINE1(name, ...)				\
-	LUA_LSM_DEFINEx(1, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+	LUA_LSM_DEFINEx(1, name, int, void, bool, BOOL, ##__VA_ARGS__)
 #define LUA_LSM_INT_BOOL_DEFINE2(name, ...)				\
-	LUA_LSM_DEFINEx(2, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+	LUA_LSM_DEFINEx(2, name, int, void, bool, BOOL, ##__VA_ARGS__)
 #define LUA_LSM_INT_BOOL_DEFINE3(name, ...)				\
-	LUA_LSM_DEFINEx(3, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+	LUA_LSM_DEFINEx(3, name, int, void, bool, BOOL, ##__VA_ARGS__)
 #define LUA_LSM_INT_BOOL_DEFINE4(name, ...)				\
-	LUA_LSM_DEFINEx(4, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+	LUA_LSM_DEFINEx(4, name, int, void, bool, BOOL, ##__VA_ARGS__)
 #define LUA_LSM_INT_BOOL_DEFINE5(name, ...)				\
-	LUA_LSM_DEFINEx(5, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+	LUA_LSM_DEFINEx(5, name, int, void, bool, BOOL, ##__VA_ARGS__)
 #define LUA_LSM_INT_BOOL_DEFINE6(name, ...)				\
-	LUA_LSM_DEFINEx(6, name, int, void, bool, DEFAULT, ##__VA_ARGS__)
+	LUA_LSM_DEFINEx(6, name, int, void, bool, BOOL, ##__VA_ARGS__)
 
 #define LUA_LSM_INT_BOOLERR_DEFINE0(name, ...)				\
 	LUA_LSM_DEFINEx(0, name, int, void, boolerr, ERRNO, ##__VA_ARGS__)
