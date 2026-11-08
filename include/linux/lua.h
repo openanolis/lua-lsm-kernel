@@ -46,6 +46,7 @@
 #define LUA_ERRSYNTAX	3
 #define LUA_ERRMEM	4
 #define LUA_ERRERR	5
+#define LUA_ERRTIME	6 /* host deadline expired; not a catchable Lua error */
 
 
 typedef struct lua_State lua_State;
@@ -202,6 +203,10 @@ LUA_API int   (lua_setfenv) (lua_State *L, int idx);
 LUA_API void  (lua_call) (lua_State *L, int nargs, int nresults);
 LUA_API int   (lua_pcall) (lua_State *L, int nargs, int nresults, int errfunc);
 LUA_API int   (lua_cpcall) (lua_State *L, lua_CFunction func, void *ud);
+
+/* Host-only, per-VM deadline shared by all coroutines. No Lua bindings. */
+LUA_API void (lua_budget_begin) (lua_State *L, u64 timeout_ns);
+LUA_API int  (lua_budget_end) (lua_State *L);
 LUA_API int   (lua_load) (lua_State *L, lua_Reader reader, void *dt,
                                         const char *chunkname);
 
