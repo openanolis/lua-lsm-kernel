@@ -90,7 +90,12 @@ Timeouts use the existing execution-failure mapping (`-EIO` for errno hooks).
 
 On success and failure, dispatch restores the Lua stack, thread/current-policy
 environments and C debug-hook settings. Main-thread Lua debug hooks and their
-callback references are cleared on exit. Policy/shared-dictionary writes,
+callback references are cleared before each module's deadline ends, so they
+cannot run on the dispatcher's later C return or leak into the next module.
+Allocated `inode_getsecurity` output is held privately until dispatch and its
+completion checks succeed; failure frees it without changing the caller's
+buffer. Length-only queries (`alloc=false`) do not allocate output.
+Policy/shared-dictionary writes,
 kernel side effects and coroutine-local state are not rolled back.
 
 Kernel resources acquired by policies or C helpers require their own cleanup.

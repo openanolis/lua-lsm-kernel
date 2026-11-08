@@ -11,6 +11,7 @@
 #include "lsm.h"
 #include "lua_object.h"
 #include <linux/lualib.h>
+#include <linux/slab.h>
 
 
 #define LSM_RET_DEFAULT(NAME)	(NAME##_default)
@@ -206,6 +207,7 @@ static inline int lua_lsm_dispatch_failret_bool(unsigned int nr)
 
 #define LUA_LSM_DISPATCH_FAILRET_DEFAULT(NAME, err) LSM_RET_DEFAULT(NAME)
 #define LUA_LSM_DISPATCH_FAILRET_ERRNO(NAME, err) (err)
+#define LUA_LSM_DISPATCH_FAILRET_GETSECURITY(NAME, err) (err)
 #define LUA_LSM_DISPATCH_FAILRET_BOOL(NAME, err) \
 	lua_lsm_dispatch_failret_bool(__LL_NR_ ## NAME)
 
@@ -258,6 +260,30 @@ static inline int lua_lsm_dispatch(lua_State *L, lua_CFunction dispatch,
 #define __LUA_FIELDS6(t, a, ...) t a; __LUA_FIELDS5(__VA_ARGS__)
 #define __LUA_INIT(t, a) .a = a
 #define __LUA_ARG(t, a) args->a
+
+#define LUA_LSM_DISPATCH_INIT_DEFAULT(args)
+#define LUA_LSM_DISPATCH_INIT_ERRNO(args)
+#define LUA_LSM_DISPATCH_INIT_BOOL(args)
+#define LUA_LSM_DISPATCH_FINISH_DEFAULT(args, err) do {} while (0)
+#define LUA_LSM_DISPATCH_FINISH_ERRNO(args, err) do {} while (0)
+#define LUA_LSM_DISPATCH_FINISH_BOOL(args, err) do {} while (0)
+
+/* Keep allocated output private until every protected completion check passes. */
+#define LUA_LSM_DISPATCH_INIT_GETSECURITY(args)					\
+	void *security_value = NULL;						\
+	void **security_buffer = (args).buffer;					\
+	if ((args).alloc)							\
+		(args).buffer = &security_value
+
+#define LUA_LSM_DISPATCH_FINISH_GETSECURITY(args, err)				\
+	do {									\
+		if ((args).alloc) {						\
+			if ((err) || (args).ret < 0)				\
+				kfree(security_value);				\
+			else							\
+				*security_buffer = security_value;			\
+		}								\
+	} while (0)
 
 static inline bool lua_lsm_hook_active(unsigned int nr)
 {
@@ -331,6 +357,8 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 				continue;						\
 			if (module->state != LMS_STATE_LIVE)				\
 				continue;						\
+			if (lua_budget_end(L))					\
+				return lua_rethrow(L, LUA_ERRTIME);			\
 			lua_budget_begin(L, lua_lsm_budget_ns());			\
 			lua_getfield(L, -1, module->name);				\
 			lua_getfield(L, -1, #NAME);					\
@@ -349,8 +377,10 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 			} else {							\
 				return luaL_error(L, "hook '%s' is not a function", #NAME);\
 			}								\
-			if (lua_budget_end(L))					\
-				return lua_rethrow(L, LUA_ERRTIME);			\
+			/* No debug callback may outlive its module deadline. */	\
+			lua_resetdebughook(L);					\
+			/* Cover the C frame's return hooks and GC as well. */	\
+			lua_budget_check(L);					\
 			lua_pop(L, 1);			/* pop _M */			\
 			RET_CHECK_ ## pcalltype(NAME, ret);				\
 		}									\
@@ -366,6 +396,7 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 		};									\
 		lua_State *L;								\
 		int err = 0;								\
+		LUA_LSM_DISPATCH_INIT_ ## failret(args);				\
 		if (!lua_lsm_hook_active(__LL_NR_ ## NAME))				\
 			goto out;							\
 		L = lvm_get();								\
@@ -379,6 +410,7 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 		err = lua_lsm_dispatch(L, __lua_lsm_dispatch_ ## NAME, &args, #NAME);\
 		lvm_put(L);								\
 out:											\
+		LUA_LSM_DISPATCH_FINISH_ ## failret(args, err);		\
 		*retp = args.ret;							\
 		return err;								\
 	}										\
@@ -512,6 +544,10 @@ out:											\
 	LUA_LSM_DEFINEx(5, name, int, int, int, ERRNO, ##__VA_ARGS__)
 #define LUA_LSM_INT_NAKED_DEFINE6(name, ...)				\
 	LUA_LSM_DEFINEx(6, name, int, int, int, ERRNO, ##__VA_ARGS__)
+
+/* inode_getsecurity transfers an allocation only after dispatch completes. */
+#define LUA_LSM_INT_GETSECURITY_DEFINE5(name, ...)				\
+	LUA_LSM_DEFINEx(5, name, int, int, int, GETSECURITY, ##__VA_ARGS__)
 
 
 /* prepare and postpone function macro */

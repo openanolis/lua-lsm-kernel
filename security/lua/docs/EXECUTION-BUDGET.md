@@ -67,8 +67,17 @@ deadline takes precedence over another error observed at the dispatch exit.
 
 The dispatcher restores its stack, environments, C debug-hook settings and VM
 ownership, and runs the existing postpone/SRCU cleanup. It clears the deadline
-even after an ordinary error, so the next hook gets a fresh budget. Main-thread
-Lua debug callbacks are cleared as before. A coroutine that errored remains
+even after an ordinary error, so the next hook gets a fresh budget. A module's
+deadline remains active through protected C-frame completion, including return
+hooks and GC; it ends when entering the next module or leaving the protected
+dispatch. Main-thread
+Lua debug hooks and callback references are cleared before each module's
+deadline ends, including hooks armed by the policy's own return event. They
+cannot run on the dispatcher's later C return or affect the next module.
+Allocated `inode_getsecurity` output stays owned by the dispatcher until all
+protected completion checks succeed; failures free it and leave the caller's
+buffer unchanged. Length-only queries do not allocate output.
+A coroutine that errored remains
 errored; a yielded coroutine can be resumed by a later invocation under that
 invocation's new budget.
 

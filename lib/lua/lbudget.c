@@ -36,6 +36,11 @@ void luaD_checkbudget(lua_State *L)
     luaD_throw(L, LUA_ERRTIME);
 }
 
+LUA_API void lua_budget_check(lua_State *L)
+{
+  luaD_checkbudget(L);
+}
+
 /* Also used outside the protected dispatch, after any ordinary error. */
 LUA_API int lua_budget_end(lua_State *L)
 {

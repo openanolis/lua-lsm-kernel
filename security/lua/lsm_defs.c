@@ -1321,7 +1321,7 @@ LUA_LSM_INT_DEFINE2(inode_killpriv, struct mnt_idmap *, idmap,
  * inode_getsecurity
  * Default: -EOPNOTSUPP
  */
-LUA_LSM_INT_NAKED_DEFINE5(inode_getsecurity, struct mnt_idmap *, idmap,
+LUA_LSM_INT_GETSECURITY_DEFINE5(inode_getsecurity, struct mnt_idmap *, idmap,
 		struct inode *, inode, const char *, name,
 		void **, buffer, bool, alloc)
 {
