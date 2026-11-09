@@ -379,6 +379,7 @@ void luaV_execute (lua_State *L, int nexeccalls) {
   StkId base;
   TValue *k;
   const Instruction *pc;
+  luaD_checkbudget(L);
  reentry:  /* entry point */
   lua_assert(isLua(L->ci));
   pc = L->savedpc;
@@ -389,12 +390,19 @@ void luaV_execute (lua_State *L, int nexeccalls) {
   for (;;) {
     const Instruction i = *pc++;
     StkId ra;
+    if (G(L)->budget_active && --G(L)->budget_count == 0) {
+      const Instruction *oldpc = L->savedpc;
+      G(L)->budget_count = LUA_BUDGET_INTERVAL;
+      L->savedpc = pc;
+      luaD_checkbudget(L);
+      L->savedpc = oldpc;  /* preserve debug line-hook history */
+    }
     if ((L->hookmask & (LUA_MASKLINE | LUA_MASKCOUNT)) &&
         (--L->hookcount == 0 || L->hookmask & LUA_MASKLINE)) {
       traceexec(L, pc);
       if (L->status == LUA_YIELD) {  /* did hook yield? */
         L->savedpc = pc - 1;
-        return;
+        goto exit;
       }
       base = L->base;
     }
@@ -600,7 +608,7 @@ void luaV_execute (lua_State *L, int nexeccalls) {
             continue;
           }
           default: {
-            return;  /* yield */
+            goto exit;  /* yield */
           }
         }
       }
@@ -632,7 +640,7 @@ void luaV_execute (lua_State *L, int nexeccalls) {
             continue;
           }
           default: {
-            return;  /* yield */
+            goto exit;  /* yield */
           }
         }
       }
@@ -643,7 +651,7 @@ void luaV_execute (lua_State *L, int nexeccalls) {
         L->savedpc = pc;
         b = luaD_poscall(L, ra);
         if (--nexeccalls == 0)  /* was previous function running `here'? */
-          return;  /* no: return */
+          goto exit;  /* no: return */
         else {  /* yes: continue its execution */
           if (b) L->top = L->ci->top;
           lua_assert(isLua(L->ci));
@@ -763,5 +771,7 @@ void luaV_execute (lua_State *L, int nexeccalls) {
       }
     }
   }
+ exit:
+  luaD_checkbudget(L);
 }
 

@@ -66,6 +66,10 @@ typedef struct CallInfo {
 ** `global state', shared by all threads of this state
 */
 typedef struct global_State {
+  u64 deadline;
+  unsigned int budget_count;
+  lu_byte budget_active;
+  lu_byte budget_expired;
   stringtable strt;  /* hash table for strings */
   lua_Alloc frealloc;  /* function to reallocate memory */
   void *ud;         /* auxiliary data to `frealloc' */

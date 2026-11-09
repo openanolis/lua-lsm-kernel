@@ -968,6 +968,16 @@ LUA_API int lua_error (lua_State *L) {
 }
 
 
+LUA_API int lua_rethrow (lua_State *L, int status) {
+  lua_lock(L);
+  api_checknelems(L, 1);
+  api_check(L, status >= LUA_ERRRUN && status <= LUA_ERRTIME);
+  luaD_throw(L, status);
+  lua_unlock(L);
+  return 0;  /* to avoid warnings */
+}
+
+
 LUA_API int lua_next (lua_State *L, int idx) {
   StkId t;
   int more;
