@@ -346,11 +346,10 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 		struct lua_lsm_module *module;						\
 		int ret = LSM_RET_DEFAULT(NAME);					\
 		lua_settop(L, 0);							\
-		lua_pushnil(L);			/* reserved slot */			\
 		lua_pushthread(L);							\
 		lua_getfenv(L, -1);			/* save thread.fenv */		\
 		lua_getfield(L, LUA_REGISTRYINDEX, "_MODULES");				\
-		/* stack: [reserved, thread, env, _MODULES] */				\
+		/* stack: [thread, env, _MODULES] */				\
 		list_for_each_entry_srcu(module, &lsm_modules, list,			\
 					srcu_read_lock_held(&modules_ss)) {		\
 			if (!__BITMAP_ISSET(__LL_NR_ ## NAME, &module->hookfuncs))	\
@@ -362,8 +361,8 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 			lua_budget_begin(L, lua_lsm_budget_ns());			\
 			lua_getfield(L, -1, module->name);				\
 			lua_getfield(L, -1, #NAME);					\
-			WARN_ON(lua_gettop(L) != 6);					\
-			/* stack: [reserved, thread, env, _MODULES, _M, lfunc] */	\
+			WARN_ON(lua_gettop(L) != 5);					\
+			/* stack: [thread, env, _MODULES, _M, lfunc] */	\
 			if (lua_isfunction(L, -1)) {					\
 				int top = lua_gettop(L);				\
 				lua_getfenv(L, -1);					\
@@ -379,8 +378,7 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 			}								\
 			/* No debug callback may outlive its module deadline. */	\
 			lua_resetdebughook(L);					\
-			/* Cover the C frame's return hooks and GC as well. */	\
-			lua_budget_check(L);					\
+			/* Keep the deadline active through C return and GC. */	\
 			lua_pop(L, 1);			/* pop _M */			\
 			RET_CHECK_ ## pcalltype(NAME, ret);				\
 		}									\

@@ -206,7 +206,6 @@ LUA_API int   (lua_cpcall) (lua_State *L, lua_CFunction func, void *ud);
 
 /* Host-only, per-VM deadline shared by all coroutines. No Lua bindings. */
 LUA_API void (lua_budget_begin) (lua_State *L, u64 timeout_ns);
-LUA_API void (lua_budget_check) (lua_State *L);
 LUA_API int  (lua_budget_end) (lua_State *L);
 LUA_API int   (lua_load) (lua_State *L, lua_Reader reader, void *dt,
                                         const char *chunkname);

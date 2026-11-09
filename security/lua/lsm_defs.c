@@ -147,7 +147,7 @@ LUA_LSM_INT_NAKED_DEFINE4(capget, const struct task_struct *, target,
 
 	lua_call(L, 1, LUA_MULTRET);
 
-	/* stack: [reserved, thread, env, _MODULES, _M, res1, ...] */
+	/* stack: [thread, env, _MODULES, _M, res1, ...] */
 	nres = lua_gettop(L) - top + 1;
 	switch (nres) {
 	case 0:
@@ -830,7 +830,7 @@ LUA_LSM_INT_NAKED_DEFINE5(inode_init_security, struct inode *, inode,
 
 	lua_call(L, 3, LUA_MULTRET);
 
-	/* stack: [reserved, thread, env, _MODULES, _M, res1, ...] */
+	/* stack: [thread, env, _MODULES, _M, res1, ...] */
 	nres = lua_gettop(L) - top + 1;
 	switch (nres) {
 	case 0:
@@ -1338,7 +1338,7 @@ LUA_LSM_INT_GETSECURITY_DEFINE5(inode_getsecurity, struct mnt_idmap *, idmap,
 
 	lua_call(L, 3, LUA_MULTRET);
 
-	/* stack: [reserved, thread, env, _MODULES, _M, res1, ...] */
+	/* stack: [thread, env, _MODULES, _M, res1, ...] */
 	nres = lua_gettop(L) - top + 1;
 	switch (nres) {
 	case 0:
@@ -1401,7 +1401,7 @@ LUA_LSM_INT_NAKED_DEFINE3(inode_listsecurity, struct inode *, inode,
 
 	lua_call(L, 1, LUA_MULTRET);
 
-	/* stack: [reserved, thread, env, _MODULES, _M, res1, ...] */
+	/* stack: [thread, env, _MODULES, _M, res1, ...] */
 	nres = lua_gettop(L) - top + 1;
 	switch (nres) {
 	case 0:
