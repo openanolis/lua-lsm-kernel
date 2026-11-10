@@ -758,8 +758,8 @@ union luai_Cast { double l_d; long l_l; };
 #ifdef __KERNEL__
 
 #define LUA_INTFRMLEN		"ll"
-#define LUA_INTFRM_T		intptr_t
-#define LUA_UINTFRM_T		uintptr_t
+#define LUA_INTFRM_T		long long
+#define LUA_UINTFRM_T		unsigned long long
 
 #elif defined(LUA_USELONGLONG)
 
