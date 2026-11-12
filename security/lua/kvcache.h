@@ -19,13 +19,6 @@
 
 #define CACHE_CAPACITY	1024
 
-/* UNINIT must stay 0: kzalloc'd LSM blobs skip an explicit initializer. */
-enum kvcache_dict_state {
-	KVCACHE_DICT_UNINIT,
-	KVCACHE_DICT_INITING,
-	KVCACHE_DICT_READY,
-};
-
 struct lua_lsm_module;
 struct lua_lsm_module_shdict;
 
@@ -46,7 +39,6 @@ struct kvcache_node {
 };
 
 struct kvcache_dict {
-	atomic_t state;
 	int capacity;
 	atomic_t count;
 	rwlock_t lock;
@@ -59,7 +51,8 @@ void kvcache_stats_show(struct seq_file *m);
 #endif
 
 int kvcache_module_nodes_gc(struct lua_lsm_module *module);
-void kvcache_dict_free(struct kvcache_dict *dict);
+void kvcache_dict_drain(struct kvcache_dict *dict);
+void kvcache_dict_free(struct kvcache_dict **dictp);
 void kvcache_dict_init(struct kvcache_dict *dict);
 
 /******************************** object cache *******************************/
@@ -67,10 +60,10 @@ void kvcache_dict_init(struct kvcache_dict *dict);
 extern const int _module_sentinel;
 #define MODULE_KEY	((void *)&_module_sentinel)
 
-int lua_object_get(lua_State *L, struct kvcache_dict *dict);
-int lua_object_incr(lua_State *L, struct kvcache_dict *dict);
-int lua_object_index(lua_State *L, struct kvcache_dict *dict);
-int lua_object_newindex(lua_State *L, struct kvcache_dict *dict);
+int lua_object_get(lua_State *L, struct kvcache_dict **dictp);
+int lua_object_incr(lua_State *L, struct kvcache_dict **dictp);
+int lua_object_index(lua_State *L, struct kvcache_dict **dictp);
+int lua_object_newindex(lua_State *L, struct kvcache_dict **dictp);
 
 /******************************** shared dict ********************************/
 

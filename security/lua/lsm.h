@@ -175,7 +175,7 @@ struct lvm_state {
 struct lua_lsm_task {
 	struct lvm_state *lvm;
 	bool lvm_teardown;
-	struct kvcache_dict dict;
+	struct kvcache_dict *dict;
 };
 
 static inline struct lua_lsm_task *lua_lsm_task(const struct task_struct *task)
@@ -186,7 +186,7 @@ static inline struct lua_lsm_task *lua_lsm_task(const struct task_struct *task)
 /* common object */
 
 struct lua_lsm_object {
-	struct kvcache_dict dict;
+	struct kvcache_dict *dict;
 };
 
 static inline struct lua_lsm_object *lua_lsm_cred(const struct cred *cred)

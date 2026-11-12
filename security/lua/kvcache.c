@@ -6,12 +6,10 @@
  */
 
 #include "debug.h"
-#include <linux/bottom_half.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/errname.h>
 #include <linux/rwlock.h>
-#include <linux/processor.h>
 #include <linux/lua.h>
 #include <linux/lualib.h>
 #include <linux/lauxlib.h>
@@ -62,7 +60,7 @@ static int kvcache_node_cmp(struct kvcache_node *n1, struct kvcache_node *n2)
 
 RB_GENERATE_STATIC(kvcache, kvcache_node, node, kvcache_node_cmp);
 
-static void __kvcache_dict_init(struct kvcache_dict *dict)
+void kvcache_dict_init(struct kvcache_dict *dict)
 {
 	rwlock_init(&dict->lock);
 	RB_INIT(&dict->root);
@@ -70,57 +68,29 @@ static void __kvcache_dict_init(struct kvcache_dict *dict)
 	dict->capacity = CACHE_CAPACITY;
 }
 
-static bool kvcache_dict_ready(struct kvcache_dict *dict)
+static struct kvcache_dict *kvcache_dict_get_or_alloc(struct kvcache_dict **dictp)
 {
-	int state;
+	struct kvcache_dict *dict, *fresh;
 
-	for (;;) {
-		state = atomic_read_acquire(&dict->state);
-		if (likely(state == KVCACHE_DICT_READY))
-			return true;
-		if (state != KVCACHE_DICT_INITING)
-			return false;
-		cpu_relax();
+	/*
+	 * Pairs with the cmpxchg publication below: a dict seen through
+	 * this load is fully initialized before any Lua code reaches it.
+	 */
+	dict = smp_load_acquire(dictp);
+	if (dict)
+		return dict;
+
+	fresh = kzalloc_obj(*fresh, lua_lsm_gfp());
+	if (!fresh)
+		return NULL;
+	kvcache_dict_init(fresh);
+
+	dict = cmpxchg(dictp, NULL, fresh);
+	if (dict) {
+		kfree(fresh);
+		return dict;
 	}
-}
-
-static int kvcache_dict_init_once(struct kvcache_dict *dict)
-{
-	int state;
-
-	for (;;) {
-		local_bh_disable();
-		state = atomic_read_acquire(&dict->state);
-		if (likely(state == KVCACHE_DICT_READY))
-			goto out_bh;
-		if (state == KVCACHE_DICT_INITING) {
-			local_bh_enable();
-			cpu_relax();
-			continue;
-		}
-		if (WARN_ON_ONCE(state != KVCACHE_DICT_UNINIT)) {
-			local_bh_enable();
-			return -EINVAL;
-		}
-
-		/*
-		 * Readers busy-wait while the dictionary is INITING. Keep the
-		 * UNINIT->READY transition within a softirq-disabled window so a
-		 * same-CPU softirq cannot observe INITING and spin before the
-		 * initializer publishes READY.
-		 */
-		if (atomic_try_cmpxchg(&dict->state, &state,
-				       KVCACHE_DICT_INITING)) {
-			__kvcache_dict_init(dict);
-			atomic_set_release(&dict->state, KVCACHE_DICT_READY);
-			goto out_bh;
-		}
-		local_bh_enable();
-	}
-
-out_bh:
-	local_bh_enable();
-	return 0;
+	return fresh;
 }
 
 static int kvcache_result(lua_State *L, int err)
@@ -196,9 +166,6 @@ kvcache_lookup(struct kvcache_dict *dict,
 {
 	struct kvcache_node tmp, *node;
 	unsigned long flags;
-
-	if (!kvcache_dict_ready(dict))
-		return NULL;
 
 	tmp.key = key;
 	tmp.module = module;
@@ -339,10 +306,6 @@ static int kvcache_set(lua_State *L, struct kvcache_dict *dict,
 	struct kvcache_node *node, *prev;
 	int err;
 
-	err = kvcache_dict_init_once(dict);
-	if (err)
-		return kvcache_result(L, err);
-
 	node = kvcache_lookup(dict, module, key);
 	if (!node) {
 		if (tt == LUA_TNIL)
@@ -439,10 +402,6 @@ static int kvcache_incr(lua_State *L, struct kvcache_dict *dict,
 	unsigned long flags;
 	int err;
 
-	err = kvcache_dict_init_once(dict);
-	if (err)
-		return kvcache_result(L, err);
-
 	node = kvcache_lookup(dict, module, key);
 	if (!node) {
 		node = kvcache_node_alloc(dict, module, key, len);
@@ -523,16 +482,10 @@ int kvcache_module_nodes_gc(struct lua_lsm_module *module)
 	return n;
 }
 
-void kvcache_dict_free(struct kvcache_dict *dict)
+void kvcache_dict_drain(struct kvcache_dict *dict)
 {
 	struct kvcache_node *node, *n;
 	struct lua_lsm_module *module;
-
-	if (!kvcache_dict_ready(dict))
-		return;
-
-	if (atomic_read(&dict->count) == 0)
-		return;
 
 	spin_lock_bh(&nodes_gc_lock);
 	RB_FOREACH(node, kvcache, &dict->root) {
@@ -553,11 +506,15 @@ void kvcache_dict_free(struct kvcache_dict *dict)
 	WARN_ON(atomic_read(&dict->count) != 0);
 }
 
-void kvcache_dict_init(struct kvcache_dict *dict)
+void kvcache_dict_free(struct kvcache_dict **dictp)
 {
-	atomic_set(&dict->state, KVCACHE_DICT_INITING);
-	__kvcache_dict_init(dict);
-	atomic_set_release(&dict->state, KVCACHE_DICT_READY);
+	struct kvcache_dict *dict = xchg(dictp, NULL);
+
+	if (!dict)
+		return;
+
+	kvcache_dict_drain(dict);
+	kfree(dict);
 }
 
 void lua_lsm_shdict_get(struct lua_lsm_module_shdict *shdict)
@@ -572,7 +529,7 @@ void lua_lsm_shdict_put(struct lua_lsm_module_shdict *shdict)
 		return;
 
 	if (refcount_release(&shdict->refcount) == 0) {
-		kvcache_dict_free(&shdict->dict);
+		kvcache_dict_drain(&shdict->dict);
 		kfree(shdict);
 	}
 }
@@ -609,29 +566,39 @@ static struct lua_lsm_module *module_from_object_fenv(lua_State *L, int idx)
 	return module;
 }
 
-int lua_object_get(lua_State *L, struct kvcache_dict *dict)
+int lua_object_get(lua_State *L, struct kvcache_dict **dictp)
 {
 	struct lua_lsm_module *module;
+	struct kvcache_dict *dict;
 
-	if (!dict)
+	if (!dictp)
 		return 0;
 
+	/* Pairs with the cmpxchg in kvcache_dict_get_or_alloc(). */
+	dict = smp_load_acquire(dictp);
+	if (!dict)
+		return 0;
 	module = module_from_object_fenv(L, 1);
 	if (!module)
 		return 0;
 	return kvcache_get(L, dict, module);
 }
 
-int lua_object_incr(lua_State *L, struct kvcache_dict *dict)
+int lua_object_incr(lua_State *L, struct kvcache_dict **dictp)
 {
 	struct lua_lsm_module *module;
+	struct kvcache_dict *dict;
 
-	if (!dict)
+	if (!dictp)
 		return kvcache_result(L, -ESRCH);
 
 	module = module_from_object_fenv(L, 1);
 	if (!module)
 		return kvcache_result(L, -ESRCH);
+
+	dict = kvcache_dict_get_or_alloc(dictp);
+	if (!dict)
+		return kvcache_result(L, -ENOMEM);
 
 	return kvcache_incr(L, dict, module);
 }
@@ -653,7 +620,7 @@ int lua_object_incr(lua_State *L, struct kvcache_dict *dict)
  *		return C.kvcache_get(L, object.kvcache, module, key)
  *	end
  */
-int lua_object_index(lua_State *L, struct kvcache_dict *dict)
+int lua_object_index(lua_State *L, struct kvcache_dict **dictp)
 {
 	if (lua_getmetatable(L, 1) == 0) {
 		__log_err("NO metatable for userdata\n");
@@ -668,7 +635,7 @@ int lua_object_index(lua_State *L, struct kvcache_dict *dict)
 		lua_pop(L, 1);
 	} while (lua_getmetatable(L, -1));
 
-	return lua_object_get(L, dict);
+	return lua_object_get(L, dictp);
 }
 
 /*
@@ -677,16 +644,21 @@ int lua_object_index(lua_State *L, struct kvcache_dict *dict)
  *		return C.kvcache_set(L, object.kvcache, module, key, v)
  *	end
  */
-int lua_object_newindex(lua_State *L, struct kvcache_dict *dict)
+int lua_object_newindex(lua_State *L, struct kvcache_dict **dictp)
 {
 	struct lua_lsm_module *module;
+	struct kvcache_dict *dict;
 
-	if (!dict)
+	if (!dictp)
 		return kvcache_result(L, -ESRCH);
 
 	module = module_from_object_fenv(L, 1);
 	if (!module)
 		return kvcache_result(L, -ESRCH);
+
+	dict = kvcache_dict_get_or_alloc(dictp);
+	if (!dict)
+		return kvcache_result(L, -ENOMEM);
 
 	return kvcache_set(L, dict, module);
 }

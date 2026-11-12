@@ -3695,8 +3695,6 @@ LUA_LSM_VOID_DEFINE0(initramfs_populated)
  */
 LUA_LSM_PREPARE_DEFINE1(bdev_alloc_security, struct block_device *, bdev)
 {
-	struct lua_lsm_object *llo = lua_lsm_bdev(bdev);
-	kvcache_dict_init(&llo->dict);
 	return 0;
 }
 
