@@ -44,6 +44,7 @@ __setup("lua.nodebug", disable_debug);
 
 /* Flag indicating whether initialization completed */
 int lua_lsm_initialized __initdata;
+const int lua_lsm_current_env_key;
 
 /********************************* lsm hook *********************************/
 
@@ -385,8 +386,8 @@ static void lvm_vm_reset(struct lvm_state *lvm)
 		return;
 
 	lua_settop(L, 0);
-	lua_pushnil(L);
-	lua_setfield(L, LUA_REGISTRYINDEX, CURR_ENV);
+	lua_pushboolean(L, 0);
+	lua_lsm_set_current_env(L);
 
 	/* Collect keys from _MODULES then clear _MODULES/_LOADED entries. */
 	lua_getfield(L, LUA_REGISTRYINDEX, "_MODULES");
@@ -670,9 +671,12 @@ static int lua_module_fenv_newindex(lua_State *L)
 	return 0;
 }
 
-static int module_load(lua_State *L, struct lua_lsm_module *module)
+static int module_load(lua_State *L)
 {
-	int err;
+	struct lua_lsm_module *module = lua_touserdata(L, 1);
+	int status;
+
+	lua_settop(L, 0);
 
 	lua_newtable(L);			/* env */
 	lua_pushvalue(L, -1);
@@ -702,43 +706,26 @@ static int module_load(lua_State *L, struct lua_lsm_module *module)
 	lua_setfield(L, -2, "__newindex");	/* metatable.__newindex = func */
 	lua_setmetatable(L, -2);		/* setmetatable(env, metatable) */
 
-	lua_pushcfunction(L, lua_traceback);
-	err = luaL_loadbuffer_wrap(L, module->chunk,
-				   module->chunk_len, module->name);
-	if (err) {
-		lua_pop(L, 2);
-		return err;
-	}
+	status = luaL_loadbuffer(L, module->chunk, module->chunk_len, module->name);
+	if (status)
+		return lua_rethrow(L, status);
 
-	/* stack: [env, traceback, modfunc] */
-	lua_pushvalue(L, -3);
-	lua_setfenv(L, -2);			/* setfenv(modfunc, env) */
+	/* stack: [env, modfunc]; failures reach the outer dispatch boundary. */
+	lua_pushvalue(L, -2);
+	lua_setfenv(L, -2);
+	lua_call(L, 0, 1);
+	if (!lua_istable(L, -1))
+		return luaL_error(L, "module '%s' did not return a table", module->name);
 
-	err = lua_pcall_wrap(L, 0, 1, -2);
-	if (err) {
-		lua_pop(L, 2);
-		return err;
-	}
-
-	/* stack: [env, traceback, _M] */
-	if (!lua_istable(L, -1)) {
-		__log_err("module <%s> is not a table: top = %d [%s]\n",
-			  module->name, lua_gettop(L), luaL_typename(L, -1));
-		lua_pop(L, 3);
-		return -EBADF;
-	}
-
-	lua_remove(L, -2);			/* remove traceback */
-	lua_remove(L, -2);			/* remove env */
+	lua_remove(L, -2);		/* remove env */
 	/* NO error, only _M is returned */
-	return 0;
+	return 1;
 }
 
 static int lua_modules_index(lua_State *L)
 {
 	const char *key = luaL_checkstring(L, 2);
 	struct lua_lsm_module *module;
-	int err;
 
 	/* module queries are always run with a read lock */
 	list_for_each_entry_srcu(module, &lsm_modules, list,
@@ -747,12 +734,10 @@ static int lua_modules_index(lua_State *L)
 			continue;
 
 		lvm_mark_dirty(L);
-		err = module_load(L, module);
-		if (err) {
-			__log_err("load: %s, err = %d, top = %d\n",
-				  key, err, lua_gettop(L));
-			return 0;
-		}
+		/* Give the loader a private C environment, even when it fails. */
+		lua_pushcfunction(L, module_load);
+		lua_pushlightuserdata(L, module);
+		lua_call(L, 1, 1);
 
 		lua_insert(L, -2);
 		lua_pushvalue(L, -2);
@@ -851,6 +836,7 @@ static int lvm_panic(lua_State *L)
 
 static int lvm_pmain(lua_State *L)
 {
+	lua_settop(L, 0);
 	luaL_openlibs(L);
 
 	/* open builtin libraries */
@@ -868,6 +854,10 @@ static int lvm_pmain(lua_State *L)
 	lua_pushcfunction(L, ll_require);
 	lua_setglobal(L, "require");
 
+	/* Keep the idle environment slot allocated for dispatch restoration. */
+	lua_pushboolean(L, 0);
+	lua_lsm_set_current_env(L);
+
 	/* build _MODULES table with metatable */
 	lua_newtable(L);			/* _MODULES table */
 	lua_createtable(L, 0, 1);		/* metatable */
@@ -877,9 +867,7 @@ static int lvm_pmain(lua_State *L)
 	lua_setmetatable(L, -2);
 	lua_setfield(L, LUA_REGISTRYINDEX, "_MODULES");
 
-	/* return true */
-	lua_pushboolean(L, 1);
-	return 1;
+	return 0;
 }
 
 /*
@@ -899,22 +887,13 @@ static lua_State *lvm_build_lua_state(struct lvm_state *lvm)
 	lua_atpanic(L, lvm_panic);
 	lua_gc(L, LUA_GCSTOP, 0);
 
-	lua_pushcfunction(L, lvm_pmain);
-	status = lua_pcall(L, 0, 1, 0);
+	status = lua_cpcall(L, lvm_pmain, NULL);
 	if (status != 0) {
 		__log_err("pcall: status = %d, top = %d, %s\n",
 			  status, lua_gettop(L), lua_tostring(L, -1));
 		lua_close(L);
 		return NULL;
 	}
-	if (!lua_toboolean(L, -1) && lua_gettop(L) != 1) {
-		__log_err("lvm_pmain: top = %d, stack[top] = [%s]\n",
-			  lua_gettop(L), luaL_typename(L, -1));
-		lua_close(L);
-		return NULL;
-	}
-	lua_pop(L, 1);
-
 	lvm_stats_vmalloc();
 	return L;
 }

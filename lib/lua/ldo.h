@@ -53,5 +53,9 @@ LUAI_FUNC int luaD_rawrunprotected (lua_State *L, Pfunc f, void *ud);
 
 LUAI_FUNC void luaD_seterrorobj (lua_State *L, int errcode, StkId oldtop);
 
+/* Independent of debug hooks, including allowhook and per-thread hookcount. */
+#define LUA_BUDGET_INTERVAL 256
+LUAI_FUNC void luaD_checkbudget (lua_State *L);
+
 #endif
 
