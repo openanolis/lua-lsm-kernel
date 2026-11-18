@@ -137,48 +137,43 @@ LUA_LSM_INT_NAKED_DEFINE4(capget, const struct task_struct *, target,
 {
 	int top = lua_gettop(L);
 	int ret = LSM_RET_DEFAULT(capget);
-	int status;
+	kernel_cap_t *e, *i, *p;
+	int nres;
 
 	*(const struct task_struct **)newtask(L) = target;
 
 	lua_pushvalue(L, -1 - 4);       /* env */
 	lua_setfenv(L, -1 - 6);         /* restore thread.env */
 
-	status = lua_pcall(L, 1, LUA_MULTRET, -1 - 6);
-	if (status != 0) {
-		const char * __maybe_unused error = lua_tostring(L, -1);
-		__log_err("pcall: status = %d, top = %d, %s\n",
-			status, lua_gettop(L), error);
-	} else {
-		/* stack: [traceback, thread, env, _MODULES, _M, res1, ...] */
-		int nres = lua_gettop(L) - top + 1;
-		kernel_cap_t *e, *i, *p;
-		switch (nres) {
-		case 0:
-			break;
-		case 1:
-			if (lua_type(L, top) == LUA_TBOOLEAN)
-				ret = lua_toboolean(L, top) ? 0 : -EPERM;
-			break;
-		case 2:
-			if (!lua_toboolean(L, top)) {
-				int errno = lua_tointeger(L, top + 1);
-				if (errno > 0 && errno <= MAX_ERRNO)
-					ret = -errno;
-			}
-			break;
-		default:
-			e = checkudata_cap(L, top);
-			i = checkudata_cap(L, top + 1);
-			p = checkudata_cap(L, top + 2);
-			if (e == NULL || i == NULL || p == NULL)
-				break;
-			*effective = *e;
-			*inheritable = *i;
-			*permitted = *p;
-			ret = 0;
-			break;
+	lua_call(L, 1, LUA_MULTRET);
+
+	/* stack: [reserved, thread, env, _MODULES, _M, res1, ...] */
+	nres = lua_gettop(L) - top + 1;
+	switch (nres) {
+	case 0:
+		break;
+	case 1:
+		if (lua_type(L, top) == LUA_TBOOLEAN)
+			ret = lua_toboolean(L, top) ? 0 : -EPERM;
+		break;
+	case 2:
+		if (!lua_toboolean(L, top)) {
+			int errno = lua_tointeger(L, top + 1);
+			if (errno > 0 && errno <= MAX_ERRNO)
+				ret = -errno;
 		}
+		break;
+	default:
+		e = checkudata_cap(L, top);
+		i = checkudata_cap(L, top + 1);
+		p = checkudata_cap(L, top + 2);
+		if (e == NULL || i == NULL || p == NULL)
+			break;
+		*effective = *e;
+		*inheritable = *i;
+		*permitted = *p;
+		ret = 0;
+		break;
 	}
 	return ret;
 }
@@ -825,7 +820,6 @@ LUA_LSM_INT_NAKED_DEFINE5(inode_init_security, struct inode *, inode,
 	int top = lua_gettop(L);
 	int ret = LSM_RET_DEFAULT(inode_init_security);
 	int nres;
-	int status;
 
 	*newinode(L) = inode;
 	dir ? *newinode(L) = dir : lua_pushnil(L);
@@ -834,15 +828,9 @@ LUA_LSM_INT_NAKED_DEFINE5(inode_init_security, struct inode *, inode,
 	lua_pushvalue(L, -3 - 4);       /* env */
 	lua_setfenv(L, -3 - 6);         /* restore thread.env */
 
-	status = lua_pcall(L, 3, LUA_MULTRET, -3 - 6);
-	if (status != 0) {
-		const char * __maybe_unused error = lua_tostring(L, -1);
-		__log_err("pcall: status = %d, top = %d, %s\n",
-			status, lua_gettop(L), error);
-		return ret;
-	}
+	lua_call(L, 3, LUA_MULTRET);
 
-	/* stack: [traceback, thread, env, _MODULES, _M, res1, ...] */
+	/* stack: [reserved, thread, env, _MODULES, _M, res1, ...] */
 	nres = lua_gettop(L) - top + 1;
 	switch (nres) {
 	case 0:
@@ -1339,7 +1327,7 @@ LUA_LSM_INT_NAKED_DEFINE5(inode_getsecurity, struct mnt_idmap *, idmap,
 {
 	int top = lua_gettop(L);
 	int ret = LSM_RET_DEFAULT(inode_getsecurity);
-	int status;
+	int nres, tt;
 
 	*newmntidmap(L) = idmap;
 	*newinode(L) = inode;
@@ -1348,41 +1336,35 @@ LUA_LSM_INT_NAKED_DEFINE5(inode_getsecurity, struct mnt_idmap *, idmap,
 	lua_pushvalue(L, -3 - 4);       /* env */
 	lua_setfenv(L, -3 - 6);         /* restore thread.env */
 
-	status = lua_pcall(L, 3, LUA_MULTRET, -3 - 6);
-	if (status != 0) {
-		const char * __maybe_unused error = lua_tostring(L, -1);
-		__log_err("pcall: status = %d, top = %d, %s\n",
-			status, lua_gettop(L), error);
-	} else {
-		/* stack: [traceback, thread, env, _MODULES, _M, res1, ...] */
-		int nres = lua_gettop(L) - top + 1;
-		int tt;
-		switch (nres) {
-		case 0:
-			break;
-		case 1:
-			tt = lua_type(L, top);
-			if (tt == LUA_TBOOLEAN) {
-				ret = lua_toboolean(L, top) ? 0 : -EPERM;
-			} else if (tt == LUA_TSTRING) {
-				size_t len;
-				const char *v = lua_tolstring(L, top, &len);
-				ret = (int)len;
-				if (alloc) {
-					*buffer = kmemdup(v, len, GFP_NOFS);
-					if (*buffer == NULL)
-						ret = -ENOMEM;
-				}
+	lua_call(L, 3, LUA_MULTRET);
+
+	/* stack: [reserved, thread, env, _MODULES, _M, res1, ...] */
+	nres = lua_gettop(L) - top + 1;
+	switch (nres) {
+	case 0:
+		break;
+	case 1:
+		tt = lua_type(L, top);
+		if (tt == LUA_TBOOLEAN) {
+			ret = lua_toboolean(L, top) ? 0 : -EPERM;
+		} else if (tt == LUA_TSTRING) {
+			size_t len;
+			const char *v = lua_tolstring(L, top, &len);
+			ret = (int)len;
+			if (alloc) {
+				*buffer = kmemdup(v, len, GFP_NOFS);
+				if (*buffer == NULL)
+					ret = -ENOMEM;
 			}
-			break;
-		default:
-			if (!lua_toboolean(L, top)) {
-				int errno = lua_tointeger(L, top + 1);
-				if (errno > 0 && errno <= MAX_ERRNO)
-					ret = -errno;
-			}
-			break;
 		}
+		break;
+	default:
+		if (!lua_toboolean(L, top)) {
+			int errno = lua_tointeger(L, top + 1);
+			if (errno > 0 && errno <= MAX_ERRNO)
+				ret = -errno;
+		}
+		break;
 	}
 	return ret;
 }
@@ -1410,43 +1392,37 @@ LUA_LSM_INT_NAKED_DEFINE3(inode_listsecurity, struct inode *, inode,
 {
 	int top = lua_gettop(L);
 	int ret = LSM_RET_DEFAULT(inode_listsecurity);
-	int status;
+	int nres, tt;
 
 	*newinode(L) = inode;
 
 	lua_pushvalue(L, -1 - 4);       /* env */
 	lua_setfenv(L, -1 - 6);         /* restore thread.env */
 
-	status = lua_pcall(L, 1, LUA_MULTRET, -1 - 6);
-	if (status != 0) {
-		const char * __maybe_unused error = lua_tostring(L, -1);
-		__log_err("pcall: status = %d, top = %d, %s\n",
-			status, lua_gettop(L), error);
-	} else {
-		/* stack: [traceback, thread, env, _MODULES, _M, res1, ...] */
-		int nres = lua_gettop(L) - top + 1;
-		int tt;
-		switch (nres) {
-		case 0:
-			break;
-		case 1:
-			tt = lua_type(L, top);
-			if (tt == LUA_TBOOLEAN) {
-				ret = lua_toboolean(L, top) ? 0 : -EPERM;
-			} else if (tt == LUA_TSTRING) {
-				size_t len;
-				const char *v = lua_tolstring(L, top, &len);
-				return xattr_list_one(buffer, remaining_size, v);
-			}
-			break;
-		default:
-			if (!lua_toboolean(L, top)) {
-				int errno = lua_tointeger(L, top + 1);
-				if (errno > 0 && errno <= MAX_ERRNO)
-					ret = -errno;
-			}
-			break;
+	lua_call(L, 1, LUA_MULTRET);
+
+	/* stack: [reserved, thread, env, _MODULES, _M, res1, ...] */
+	nres = lua_gettop(L) - top + 1;
+	switch (nres) {
+	case 0:
+		break;
+	case 1:
+		tt = lua_type(L, top);
+		if (tt == LUA_TBOOLEAN) {
+			ret = lua_toboolean(L, top) ? 0 : -EPERM;
+		} else if (tt == LUA_TSTRING) {
+			size_t len;
+			const char *v = lua_tolstring(L, top, &len);
+			return xattr_list_one(buffer, remaining_size, v);
 		}
+		break;
+	default:
+		if (!lua_toboolean(L, top)) {
+			int errno = lua_tointeger(L, top + 1);
+			if (errno > 0 && errno <= MAX_ERRNO)
+				ret = -errno;
+		}
+		break;
 	}
 	return ret;
 }
