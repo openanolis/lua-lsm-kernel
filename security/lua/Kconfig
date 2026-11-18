@@ -4,6 +4,7 @@ config SECURITY_LUA_LSM
 	bool "Lua based LSM Support"
 	depends on SECURITY && HAS_LUA
 	select LUA
+	select SYMBOLIC_ERRNAME
 	default n
 	help
 	  This selects the Lua based LSM.

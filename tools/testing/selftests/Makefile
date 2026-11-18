@@ -63,6 +63,7 @@ TARGETS += livepatch
 TARGETS += liveupdate
 TARGETS += lkdtm
 TARGETS += lsm
+TARGETS += lua_lsm
 TARGETS += membarrier
 TARGETS += memfd
 TARGETS += memory-hotplug
