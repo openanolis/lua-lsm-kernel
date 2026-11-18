@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifdef __linux__
 /*
  * Defer to libc: glibc headers may already have set _BITS_BYTESWAP_H
