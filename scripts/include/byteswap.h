@@ -1,3 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+#ifdef __linux__
+/*
+ * Defer to libc: glibc headers may already have set _BITS_BYTESWAP_H
+ * via <bits/byteswap.h>, which would skip the shim below and leave
+ * bswap_16/32/64 undefined for host tools such as modpost.
+ */
+#include_next <byteswap.h>
+#else
+
 #ifndef _BITS_BYTESWAP_H
 #define _BITS_BYTESWAP_H 1
 
@@ -68,3 +78,5 @@ __bswap_64 (__uint64_t __bsx)
 #define bswap_64(x) __bswap_64 (x)
 
 #endif /* _BITS_BYTESWAP_H */
+
+#endif /* __linux__ */
