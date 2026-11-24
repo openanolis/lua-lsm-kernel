@@ -1,0 +1,114 @@
+# Runs one harness matrix against the build artifacts.
+name: matrix
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        description: Matrix slug, used for the junit file and artifact name
+        required: true
+        type: string
+      config:
+        description: Matrix config path, relative to the harness or absolute
+        required: true
+        type: string
+      config-in-kernel:
+        description: Resolve config against the checked-out kernel tree
+        type: boolean
+        default: false
+      kernel-artifact:
+        required: true
+        type: string
+      kernel-tree:
+        description: Check out the kernel tree (matrix files or policies live in it)
+        type: boolean
+        default: false
+      mem:
+        type: string
+        default: 4G
+      smp:
+        type: string
+        default: "2"
+      timeout:
+        type: number
+        default: 60
+
+env:
+  WS: ${{ github.workspace }}/ws
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout }}
+    steps:
+      - name: Checkout kernel
+        if: inputs.kernel-tree
+        uses: actions/checkout@v4
+        with:
+          path: ws/kernel/linux
+          fetch-depth: 1
+
+      - name: Checkout harness
+        uses: actions/checkout@v4
+        with:
+          repository: chenzongyao200127/lua-lsm-testsuite
+          ref: main
+          path: ws/lua-lsm-testsuite
+
+      - name: Download kernel
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.kernel-artifact }}
+          path: ws/artifacts/kernel
+
+      - name: Download rootfs
+        uses: actions/download-artifact@v4
+        with:
+          name: lua-lsm-rootfs
+          path: ws/artifacts/rootfs
+
+      - name: Prepare host
+        run: |
+          # Artifact downloads do not preserve modes; sshd-side auth needs 0600.
+          chmod 600 "$WS/artifacts/rootfs/ci_key"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 openssh-client
+          test -e /dev/kvm || { echo "::error::/dev/kvm is required"; exit 1; }
+          sudo chmod 666 /dev/kvm
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Run matrix
+        env:
+          CONFIG: ${{ inputs.config }}
+          CONFIG_IN_KERNEL: ${{ inputs.config-in-kernel }}
+        run: |
+          cd "$WS/lua-lsm-testsuite"
+          uv sync --dev
+          config=$CONFIG
+          if [ "$CONFIG_IN_KERNEL" = "true" ]; then
+            config="$WS/kernel/linux/$config"
+          fi
+          export MEM_SIZE=${{ inputs.mem }} SMP_COUNT=${{ inputs.smp }}
+          uv run python -m harness matrix \
+            --config "$config" \
+            --parallel 1 \
+            --kernel "$WS/artifacts/kernel/bzImage" \
+            --rootfs "$WS/artifacts/rootfs/rootfs.qcow2" \
+            --share-dir "$WS" \
+            --ssh-key "$WS/artifacts/rootfs/ci_key" \
+            --junit "$WS/junit-${{ inputs.matrix }}.xml"
+
+      - name: Summarize
+        if: always()
+        run: find "$WS/lua-lsm-testsuite/runs" -name matrix.json -exec cat {} + || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lua-lsm-${{ inputs.matrix }}-runs
+          path: |
+            ws/lua-lsm-testsuite/runs
+            ws/junit-${{ inputs.matrix }}.xml
+          if-no-files-found: warn
