@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# KCSAN + lockdep concurrency matrix. panic_on_warn stays off because the
+# mainline base reports benign upstream races on every boot. A KCSAN report is
+# ignored only when its header and both stacks name no Lua-LSM or interpreter
+# code; every other splat is fatal.
+name: concurrency
+workload: concurrency
+defaults:
+  kvm_required: true
+  kind: bughunt
+  panic_on_warn: false
+  known_blocks:
+    - '(?s)BUG: KCSAN: data-race in (?!.*(?:lua_lsm|lua[A-Z]_|lua_|luaopen_|lvm|kvcache|shdict|module_load|module_unreg|module_write|register_write|unregister_write|modules_show|module_from_object_fenv|lsm_funcs_show|open_lsm_funcs|Arith|l_str|traceexec))'
+  policy: /mnt/host/kernel/linux/.github/ci/policies/allow-all.lua
+  concurrency_workers: 4
+  concurrency_duration_s: 30
+  concurrency_cycles: 20
+  workload_timeout_s: 600
+axes:
+  lvm_pool_max: [0, 32]
+exclude: []

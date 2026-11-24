@@ -2,23 +2,31 @@ name: Lua-LSM CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
+    inputs:
+      concurrency:
+        description: Run the concurrency matrix (fails until the unregister races are fixed)
+        type: boolean
+        default: false
+
+env:
+  WS: ${{ github.workspace }}/ws
 
 jobs:
-  functional:
-    name: functional matrix
-    # ubuntu-24.04: newer glibc sys/byteorder.h clashes with relocs.c le*_to_cpu
+  build:
+    name: build kernel + rootfs
+    # ubuntu-latest ships a glibc whose sys/byteorder.h clashes with relocs.c.
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    env:
-      WS: ${{ github.workspace }}/ws
     steps:
-      - name: Checkout kernel (PR merge)
+      - name: Checkout kernel
         uses: actions/checkout@v4
         with:
           path: ws/kernel/linux
+          fetch-depth: 1
 
-      - name: Checkout test harness
+      - name: Checkout harness
         uses: actions/checkout@v4
         with:
           repository: chenzongyao200127/lua-lsm-testsuite
@@ -29,19 +37,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            qemu-system-x86 openssh-client debootstrap e2fsprogs \
+            qemu-system-x86 qemu-utils openssh-client debootstrap e2fsprogs \
             flex bison libelf-dev libssl-dev bc cpio
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v5
-
-      - name: Check KVM
-        run: |
-          if [ ! -e /dev/kvm ]; then
-            echo "::error::/dev/kvm missing on runner; functional matrix requires KVM"
-            exit 1
-          fi
-          sudo chmod 666 /dev/kvm
 
       - name: Build kernel
         run: |
@@ -49,43 +46,105 @@ jobs:
           make defconfig
           ./scripts/kconfig/merge_config.sh -m .config .github/ci/kernel.config
           make olddefconfig
-          grep -E "CONFIG_SECURITY_LUA_LSM=|CONFIG_MODULES=|CONFIG_9P_FS=" .config
+          grep -E "CONFIG_SECURITY_LUA_LSM=|CONFIG_SECURITY_LUA_LSM_STATS=|CONFIG_MODULES=|CONFIG_9P_FS=" .config
           make -j"$(nproc)" bzImage
 
-      - name: Build minimal rootfs
+      - name: Build rootfs
         run: |
           ssh-keygen -t rsa -b 2048 -f "$WS/ci_key" -N "" -q
           sudo SSH_PUBKEY="$WS/ci_key.pub" OUTPUT="$WS/rootfs.img" \
+            IMAGE_SIZE=4G \
             bash "$WS/lua-lsm-testsuite/tools/create_ci_rootfs.sh"
           sudo chown "$USER" "$WS/rootfs.img"
+          # Mostly holes; qcow2 -c keeps the artifact small and the harness
+          # picks the disk format from the suffix.
+          qemu-img convert -f raw -O qcow2 -c "$WS/rootfs.img" "$WS/rootfs.qcow2"
+          rm -f "$WS/rootfs.img"
 
-      - name: Run functional matrix
-        run: |
-          cd "$WS/lua-lsm-testsuite"
-          uv sync --dev
-          export MEM_SIZE=4G SMP_COUNT=2
-          uv run python -m harness matrix \
-            --config configs/functional.yaml \
-            --parallel 1 \
-            --kernel "$WS/kernel/linux/arch/x86/boot/bzImage" \
-            --rootfs "$WS/rootfs.img" \
-            --share-dir "$WS" \
-            --ssh-key "$WS/ci_key" \
-            --junit "$WS/junit.xml"
-
-      - name: Summarize results
-        if: always()
-        run: |
-          find "$WS/lua-lsm-testsuite/runs" -name matrix.json | while read -r f; do
-            echo "== $f"; cat "$f"
-          done
-
-      - name: Upload artifacts
-        if: always()
+      - name: Upload kernel
         uses: actions/upload-artifact@v4
         with:
-          name: lua-lsm-functional-runs
+          name: lua-lsm-kernel
+          path: ws/kernel/linux/arch/x86/boot/bzImage
+          if-no-files-found: error
+
+      - name: Upload rootfs and key
+        uses: actions/upload-artifact@v4
+        with:
+          name: lua-lsm-rootfs
           path: |
-            ws/lua-lsm-testsuite/runs
-            ws/junit.xml
-          if-no-files-found: warn
+            ws/rootfs.qcow2
+            ws/ci_key
+            ws/ci_key.pub
+          if-no-files-found: error
+
+  build-concurrency:
+    name: build KCSAN + lockdep kernel
+    # Opt-in until the unregister races are fixed: ~12 min build for an
+    # expected kernel-bug verdict.
+    if: inputs.concurrency || contains(github.event.pull_request.labels.*.name, 'concurrency')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout kernel
+        uses: actions/checkout@v4
+        with:
+          path: ws/kernel/linux
+          fetch-depth: 1
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            flex bison libelf-dev libssl-dev bc cpio
+
+      - name: Build kernel
+        run: |
+          cd "$WS/kernel/linux"
+          make defconfig
+          ./scripts/kconfig/merge_config.sh -m .config \
+            .github/ci/kernel.config .github/ci/kernel.config.concurrency
+          make olddefconfig
+          grep -E "CONFIG_KCSAN=|CONFIG_KCSAN_STRICT=|CONFIG_PROVE_LOCKING=|CONFIG_PREEMPT=" .config
+          make -j"$(nproc)" bzImage
+
+      - name: Upload kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: lua-lsm-kernel-concurrency
+          path: ws/kernel/linux/arch/x86/boot/bzImage
+          if-no-files-found: error
+
+  functional:
+    name: functional matrix
+    needs: build
+    uses: ./.github/workflows/matrix.yml
+    with:
+      matrix: functional
+      config: configs/functional.yaml
+      kernel-artifact: lua-lsm-kernel
+
+  policies:
+    name: custom policy matrix
+    needs: build
+    uses: ./.github/workflows/matrix.yml
+    with:
+      matrix: policies
+      config: configs/policies.yaml
+      kernel-artifact: lua-lsm-kernel
+      kernel-tree: true
+
+  concurrency:
+    name: concurrency correctness
+    needs: [build, build-concurrency]
+    if: inputs.concurrency || contains(github.event.pull_request.labels.*.name, 'concurrency')
+    uses: ./.github/workflows/matrix.yml
+    with:
+      matrix: concurrency
+      config: .github/ci/concurrency.yaml
+      config-in-kernel: true
+      kernel-artifact: lua-lsm-kernel-concurrency
+      kernel-tree: true
+      mem: 6G
+      smp: "4"
+      timeout: 90
