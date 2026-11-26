@@ -147,6 +147,42 @@ int lua_lsm_module_unregister(const char *name);
 
 int modules_show(struct seq_file *m, void *v);
 
+/********************** securityfs shared dictionary ************************/
+
+enum lua_lsm_shdict_op {
+	LUA_LSM_SHDICT_SET,
+	LUA_LSM_SHDICT_GET,
+	LUA_LSM_SHDICT_DELETE,
+	LUA_LSM_SHDICT_INCR,
+};
+
+enum lua_lsm_shdict_value_type {
+	LUA_LSM_SHDICT_BOOLEAN,
+	LUA_LSM_SHDICT_NUMBER,
+	LUA_LSM_SHDICT_STRING,
+};
+
+struct lua_lsm_shdict_request {
+	enum lua_lsm_shdict_op op;
+	enum lua_lsm_shdict_value_type type;
+	const char *module;
+	const char *dict;
+	const char *key;
+	union {
+		bool boolean;
+		lua_Number number;
+		struct {
+			const char *data;
+			size_t len;
+		} string;
+	} value;
+};
+
+int lua_lsm_shdict_call(const struct lua_lsm_shdict_request *request,
+			char *result, size_t result_size,
+			size_t *result_len);
+int lua_lsm_shdict_dump(char *buf, size_t size, size_t *result_len);
+
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
 void lua_lsm_hook_stats_record(unsigned int nr, u64 delta);
 void lvm_stats_show(struct seq_file *m);

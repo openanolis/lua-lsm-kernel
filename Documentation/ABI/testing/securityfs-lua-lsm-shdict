@@ -1,0 +1,60 @@
+What:		/sys/kernel/security/lua/shdict
+Date:		November 2026
+Contact:	Lua-LSM project (https://github.com/openanolis/lua-lsm-kernel/issues)
+Description:
+		This testing interface lets an administrator inspect or update
+		a named dictionary in a loaded Lua-LSM policy. It is provided
+		when Lua-LSM and securityfs are available. The file mode is
+		0600. Opening, reading and writing require CAP_MAC_ADMIN in
+		the initial user namespace, in addition to file permissions.
+
+		Each write supplies one request, at most 4096 bytes including
+		any line ending. An optional trailing CR/LF is stripped.
+		Literal NUL, CR or LF within the request is not accepted.
+		Spaces and tabs separate tokens. Module, dictionary and key
+		names must each be 1 to 128 bytes, without ASCII whitespace,
+		control bytes or DEL. The accepted forms are:
+
+		  get MODULE DICT KEY
+		  set MODULE DICT KEY boolean true|false
+		  set MODULE DICT KEY number VALUE
+		  set MODULE DICT KEY string VALUE
+		  set MODULE DICT KEY hex VALUE
+		  delete MODULE DICT KEY
+		  incr MODULE DICT KEY [DELTA]
+
+		Numeric operands are signed 64-bit decimal integers. The
+		default increment is 1; incrementing a missing key sets it
+		to the delta. An out-of-range increment returns ERANGE without
+		modifying the value. String and hex take the rest of the input
+		after separators; hex encodes each byte as two digits and
+		allows binary string data. An empty string is valid.
+
+		A read on the same open file description returns the result of
+		the most recent successful request: true for set
+		or delete, the decimal result of incr, or the scalar value of
+		get. String results are raw bytes; an empty string returns
+		zero bytes. A missing key on get returns ENOENT at write time.
+		The response has no added newline and is at most 4096 bytes.
+		A write which enters request processing clears any previous
+		response before parsing, including if that parsing fails.
+
+		Reading a freshly opened file without a request enumerates
+		keys in LIVE modules. Each line contains the module, dictionary,
+		key, type and value separated by spaces. Non-printable bytes
+		and backslashes are escaped as \xNN. Lightuserdata is shown
+		as <hidden>, without disclosing an address. Empty dictionaries
+		produce no rows.
+
+		A successful enumeration is a point-in-time view of the
+		exported data. Sustained updates may cause EAGAIN; retry with
+		backoff. Output up to and including 65536 bytes is accepted;
+		oversized output fails with E2BIG rather than being truncated.
+		Once prepared, the result remains unchanged across partial
+		reads on that open unless replaced by a write.
+
+		This is a stream interface: seek and positioned I/O are not
+		supported. Descriptors shared by dup() or fork() also share the
+		buffer and read cursor; they do not provide a write/read
+		transaction. Use separate opens for independent operations.
+		The interface is experimental and is not a stable ABI.
