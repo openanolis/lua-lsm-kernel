@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Lua based LSM
  *
@@ -8,33 +8,26 @@
 #define pr_fmt(fmt)	"lua-lsm: " fmt
 
 #include "debug.h"
-#include <linux/init.h>
-#include <linux/bitops.h>
-#include <linux/kstrtox.h>
-#include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/printk.h>
 #include <linux/compiler.h>
-#include <linux/cpu.h>
-#include <linux/rwlock.h>
-#include <linux/cred.h>
-#include <linux/percpu.h>
-#include <linux/syscalls.h>	/* for __MAP */
-#include <linux/timekeeping.h>	/* for ktime_get */
-#include <linux/lsm_hooks.h>
-#include <uapi/linux/lsm.h>
-#include <linux/lua.h>
-#include <linux/lualib.h>
-#include <linux/lauxlib.h>
-#include <linux/lockdep.h>
 #include <linux/srcu.h>
+#include <linux/lua.h>
+#include <linux/lauxlib.h>
 #include "lsm.h"
 #include "lua_object.h"
-#include "lsm_defs.h"
+/*
+ * Per-VM loaded modules: the identity-keyed cache, chunk loading into a
+ * VM, and module-table resolution (by identity and by name).
+ */
 
 static int loaded_modules_key;
 
-
+/*
+ * Push this VM's module cache: a registry table that maps each module
+ * pointer (lightuserdata key) to that module's table _M.  Created on
+ * first use.
+ */
 void lvm_push_loaded_modules(lua_State *L)
 {
 	lua_pushlightuserdata(L, &loaded_modules_key);
@@ -117,6 +110,7 @@ bool lvm_put_module(lua_State *L, struct lua_lsm_module *module)
 	if (!lvm_forget_module(L, module))
 		return false;
 
+	/* The table is unreachable now; let its memory go. */
 	lua_gc(L, LUA_GCCOLLECT, 0);
 	__log_info("dropped module <%s>, loaded_vms = %d\n",
 		   module->name, atomic_read(&module->loaded_vm_count) - 1);
@@ -124,6 +118,11 @@ bool lvm_put_module(lua_State *L, struct lua_lsm_module *module)
 	return true;
 }
 
+/*
+ * Iterate the cache: return some module still remembered in this VM.
+ * Each call restarts from scratch, so removing entries between calls
+ * (as lvm_put_loaded_modules does) is safe.
+ */
 static struct lua_lsm_module *lvm_next_loaded_module(lua_State *L)
 {
 	struct lua_lsm_module *module;
@@ -142,12 +141,11 @@ static struct lua_lsm_module *lvm_next_loaded_module(lua_State *L)
 
 static int lua_module_fenv_newindex(lua_State *L)
 {
-	/* args: t, k, v */
 	__log_warn("Warning: set global variable, [%s] %s - [%s] %s\n",
 		   luaL_typename(L, 2), lua_tostring(L, 2) ?: "(null)",
 		   luaL_typename(L, 3), lua_tostring(L, 3) ?: "(null)");
 
-	/* XXX: t[k] = v, Warning it, but still perform assignment */
+	/* XXX: warn, but still perform the assignment */
 	lua_rawset(L, 1);
 	return 0;
 }
@@ -194,7 +192,7 @@ static int module_load(lua_State *L, struct lua_lsm_module *module)
 	lua_setfield(L, -2, "__index");
 	lua_pushcfunction(L, lua_shared_newindex);
 	lua_setfield(L, -2, "__newindex");
-	lua_setmetatable(L, -2);			/* setmetatable(shared, mt) */
+	lua_setmetatable(L, -2);	/* setmetatable(shared, mt) */
 	lua_setfield(L, env, "shared");
 
 	lua_createtable(L, 0, 2);
@@ -228,7 +226,7 @@ static int module_load(lua_State *L, struct lua_lsm_module *module)
 	if (!lua_istable(L, -1)) {
 		__log_err("module <%s> is not a table: top = %d [%s]\n",
 			  module->name, lua_gettop(L), luaL_typename(L, -1));
-		lua_pop(L, 3);				/* traceback, env, result */
+		lua_pop(L, 3);		/* traceback, env, result */
 		return -EBADF;
 	}
 
@@ -347,10 +345,6 @@ int lua_modules_index(lua_State *L)
 	return 0;
 }
 
-/*
- * Drop each module reference owned by a Lua VM.  Each pointer stays valid
- * until its loaded-VM reference is released after garbage collection.
- */
 void lvm_put_loaded_modules(lua_State *L)
 {
 	struct lua_lsm_module *module;
@@ -358,5 +352,3 @@ void lvm_put_loaded_modules(lua_State *L)
 	while ((module = lvm_next_loaded_module(L)))
 		lvm_put_module(L, module);
 }
-
-/********************************** Lua VM **********************************/

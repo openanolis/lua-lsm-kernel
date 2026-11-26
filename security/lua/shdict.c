@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Lua based LSM
  *
@@ -8,31 +8,15 @@
 #define pr_fmt(fmt)	"lua-lsm: " fmt
 
 #include "debug.h"
-#include <linux/init.h>
-#include <linux/bitops.h>
-#include <linux/kstrtox.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/printk.h>
 #include <linux/compiler.h>
-#include <linux/cpu.h>
-#include <linux/rwlock.h>
-#include <linux/cred.h>
-#include <linux/percpu.h>
-#include <linux/syscalls.h>	/* for __MAP */
-#include <linux/timekeeping.h>	/* for ktime_get */
-#include <linux/lsm_hooks.h>
-#include <uapi/linux/lsm.h>
+#include <linux/spinlock.h>
 #include <linux/lua.h>
-#include <linux/lualib.h>
 #include <linux/lauxlib.h>
-#include <linux/lockdep.h>
-#include <linux/srcu.h>
 #include "lsm.h"
 #include "lua_object.h"
-#include "lsm_defs.h"
-
-/********************************** sandbox **********************************/
 
 static struct lua_lsm_module_shdict *
 lua_lsm_module_find_shdict(struct lua_lsm_module *module, const char *name)

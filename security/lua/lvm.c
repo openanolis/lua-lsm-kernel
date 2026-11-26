@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Lua based LSM
  *
@@ -9,30 +9,18 @@
 
 #include "debug.h"
 #include <linux/init.h>
-#include <linux/bitops.h>
 #include <linux/kstrtox.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/printk.h>
 #include <linux/compiler.h>
-#include <linux/cpu.h>
-#include <linux/rwlock.h>
-#include <linux/cred.h>
 #include <linux/percpu.h>
-#include <linux/syscalls.h>	/* for __MAP */
-#include <linux/timekeeping.h>	/* for ktime_get */
-#include <linux/lsm_hooks.h>
-#include <uapi/linux/lsm.h>
+#include <linux/spinlock.h>
 #include <linux/lua.h>
 #include <linux/lualib.h>
 #include <linux/lauxlib.h>
-#include <linux/lockdep.h>
-#include <linux/srcu.h>
 #include "lsm.h"
 #include "lua_object.h"
-#include "lsm_defs.h"
-
-/********************************** lvm **********************************/
 
 static DEFINE_PER_CPU(struct lvm_state *, irq_lvms);
 
@@ -318,7 +306,6 @@ void lvm_put(lua_State *L)
 		put_cpu_var(irq_lvms);
 }
 
-
 static const luaL_Reg builtinlibs[] = {
 	{ "kernel",	luaopen_kernel		},
 	{ "fs",		luaopen_fs		},
@@ -341,6 +328,14 @@ static void lualibs_openall(lua_State *L)
 	}
 }
 
+/*
+ * require() replacement: only builtin libs are ever in _LOADED, so a
+ * module require resolves to nil.  The _LOADED table below the result
+ * is discarded by the metamethod poscall truncation.
+ *
+ * in:  (modname) function call
+ * out: 1 result: _LOADED[modname]
+ */
 static int ll_require(lua_State *L)
 {
 	const char *modname = luaL_checkstring(L, 1);
@@ -374,11 +369,7 @@ static int lvm_panic(lua_State *L)
 static int lvm_pmain(lua_State *L)
 {
 	luaL_openlibs(L);
-
-	/* open builtin libraries */
 	lualibs_openall(L);
-
-	/* shared dict init */
 	shdict_init(L);
 
 	lua_gc(L, LUA_GCRESTART, 0);
@@ -394,12 +385,11 @@ static int lvm_pmain(lua_State *L)
 	lua_newtable(L);			/* _MODULES table */
 	lua_createtable(L, 0, 1);		/* metatable */
 	lua_pushcfunction(L, lua_modules_index); /* TODO: pass it as args */
-	lua_setfield(L, -2, "__index");		/* metatable.__index = func */
+	lua_setfield(L, -2, "__index");
 	/* setmetatable(_MODULES, metatable) */
 	lua_setmetatable(L, -2);
 	lua_setfield(L, LUA_REGISTRYINDEX, "_MODULES");
 
-	/* return true */
 	lua_pushboolean(L, 1);
 	return 1;
 }

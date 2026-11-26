@@ -150,7 +150,7 @@ LUA_LSM_INT_NAKED_DEFINE4(capget, const struct task_struct *, target,
 		__log_err("pcall: status = %d, top = %d, %s\n",
 			status, lua_gettop(L), error);
 	} else {
-		/* stack: [traceback, thread, env, _MODULES, _M, res1, ...] */
+		/* stack: [traceback, thread, env, modules, _M, res1, ...] */
 		int nres = lua_gettop(L) - top + 1;
 		kernel_cap_t *e, *i, *p;
 		switch (nres) {
@@ -842,7 +842,7 @@ LUA_LSM_INT_NAKED_DEFINE5(inode_init_security, struct inode *, inode,
 		return ret;
 	}
 
-	/* stack: [traceback, thread, env, _MODULES, _M, res1, ...] */
+	/* stack: [traceback, thread, env, modules, _M, res1, ...] */
 	nres = lua_gettop(L) - top + 1;
 	switch (nres) {
 	case 0:
@@ -1354,7 +1354,7 @@ LUA_LSM_INT_NAKED_DEFINE5(inode_getsecurity, struct mnt_idmap *, idmap,
 		__log_err("pcall: status = %d, top = %d, %s\n",
 			status, lua_gettop(L), error);
 	} else {
-		/* stack: [traceback, thread, env, _MODULES, _M, res1, ...] */
+		/* stack: [traceback, thread, env, modules, _M, res1, ...] */
 		int nres = lua_gettop(L) - top + 1;
 		int tt;
 		switch (nres) {
@@ -1423,7 +1423,7 @@ LUA_LSM_INT_NAKED_DEFINE3(inode_listsecurity, struct inode *, inode,
 		__log_err("pcall: status = %d, top = %d, %s\n",
 			status, lua_gettop(L), error);
 	} else {
-		/* stack: [traceback, thread, env, _MODULES, _M, res1, ...] */
+		/* stack: [traceback, thread, env, modules, _M, res1, ...] */
 		int nres = lua_gettop(L) - top + 1;
 		int tt;
 		switch (nres) {

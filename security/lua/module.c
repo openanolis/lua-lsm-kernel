@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Lua based LSM
  *
@@ -8,41 +8,34 @@
 #define pr_fmt(fmt)	"lua-lsm: " fmt
 
 #include "debug.h"
-#include <linux/init.h>
-#include <linux/bitops.h>
-#include <linux/kstrtox.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/printk.h>
 #include <linux/compiler.h>
 #include <linux/cpu.h>
-#include <linux/rwlock.h>
-#include <linux/cred.h>
 #include <linux/percpu.h>
-#include <linux/syscalls.h>	/* for __MAP */
-#include <linux/timekeeping.h>	/* for ktime_get */
-#include <linux/lsm_hooks.h>
-#include <uapi/linux/lsm.h>
-#include <linux/lua.h>
-#include <linux/lualib.h>
-#include <linux/lauxlib.h>
 #include <linux/lockdep.h>
 #include <linux/srcu.h>
+#include <linux/seq_file.h>
+#include <linux/spinlock.h>
+#include <linux/workqueue.h>
+#include <linux/lua.h>
+#include <linux/lauxlib.h>
 #include "lsm.h"
 #include "lua_object.h"
-#include "lsm_defs.h"
-
+/*
+ * Module objects and their lifetime: registration, the GOING state
+ * machine, orphan list + finalize work, SRCU release, irq-VM drop
+ * queueing.
+ */
 struct list_head lsm_modules = LIST_HEAD_INIT(lsm_modules);
 static DEFINE_MUTEX(modules_mutex);
 DEFINE_SRCU(modules_ss);
 
+static LIST_HEAD(orphan_modules);
 static void lua_lsm_module_finalize_workfn(struct work_struct *work);
 static DECLARE_WORK(lua_lsm_module_finalize_work,
 		    lua_lsm_module_finalize_workfn);
-
-static LIST_HEAD(orphan_modules);
-
-/********************************** module **********************************/
 
 static int lvm_writer(lua_State *L, const void *b, size_t size, void *B)
 {
@@ -133,15 +126,17 @@ static int module_table_extract(lua_State *L, struct lua_lsm_module *module)
 				switch (lua_type(L, -1)) {
 				case LUA_TSTRING:
 					s = lua_tostring(L, -1);
-					*(const char **)p = kstrdup(s, GFP_KERNEL);
+					*(const char **)p =
+						kstrdup(s, GFP_KERNEL);
 					break;
 				case LUA_TNUMBER:
 					*(int *)p = (int)lua_tointeger(L, -1);
 					break;
 				}
 			} else {
-				__log_err("field '%s' must be a %s\n", key,
-					  lua_typename(L, module_fields[i].type));
+				__log_err("field '%s' must be a %s\n",
+					  key, lua_typename(L,
+						       module_fields[i].type));
 			}
 			goto pop_value;
 		}
@@ -152,12 +147,13 @@ static int module_table_extract(lua_State *L, struct lua_lsm_module *module)
 				continue;
 
 			if (!lua_lsm_hook_supported(i)) {
-				__log_err("hook '%s' is not supported by Lua-LSM\n",
+				__log_err("hook '%s' is not supported\n",
 					  key);
 				return -EOPNOTSUPP;
 			}
 			if (!lua_isfunction(L, -1)) {
-				__log_err("field '%s' must be a function\n", key);
+				__log_err("field '%s' must be a function\n",
+					  key);
 				goto pop_value;
 			}
 
@@ -447,6 +443,11 @@ static void lua_lsm_module_release_srcu(struct rcu_head *rcu)
 
 	mutex_lock(&modules_mutex);
 	if (atomic_read(&module->loaded_vm_count) != 0) {
+		/*
+		 * A load racing with the GOING flip can hold a loaded-VM
+		 * reference here (it will undo itself on the state re-check).
+		 * Re-queue the module; the final put re-runs the finalize work.
+		 */
 		INIT_LIST_HEAD(&module->orphan);
 		list_add_tail(&module->orphan, &orphan_modules);
 		mutex_unlock(&modules_mutex);
@@ -503,13 +504,13 @@ static void lua_lsm_module_finalize_workfn(struct work_struct *work)
 int lua_lsm_module_unregister(const char *name)
 {
 	struct lua_lsm_module *module;
-	int found = 0;
+	bool found = false;
 	int remaining;
 
 	mutex_lock(&modules_mutex);
 	list_for_each_entry(module, &lsm_modules, list) {
 		if (strcmp(module->name, name) == 0) {
-			found = 1;
+			found = true;
 			break;
 		}
 	}
@@ -544,7 +545,7 @@ int lua_lsm_module_unregister(const char *name)
 	if (remaining > 0) {
 		irq_vms_drop_module(module);
 
-		__log_info("Unregister module <%s> from pcpu VMs, remaining = %d\n",
+		__log_info("Unregister module <%s>, pcpu VMs left: %d\n",
 			   name, atomic_read(&module->loaded_vm_count));
 	}
 
@@ -572,10 +573,12 @@ int modules_show(struct seq_file *m, void *v)
 	seq_printf(m, "%s\n", TABLINE);
 
 	idx = srcu_read_lock(&modules_ss);
-	list_for_each_entry_srcu(module, &lsm_modules, list, srcu_read_lock_held(&modules_ss)) {
+	list_for_each_entry_srcu(module, &lsm_modules, list,
+				 srcu_read_lock_held(&modules_ss)) {
 		seq_printf(m, "%-20s %-10s %6zu %4d %5d %6d %6d %-34s\n",
 			   module->name, module->license, module->chunk_len,
-			   module->nhooks, atomic_read(&module->loaded_vm_count),
+			   module->nhooks,
+			   atomic_read(&module->loaded_vm_count),
 			   atomic_read(&module->shdict_count),
 			   atomic_read(&module->kvnodes_count), module->author);
 	}

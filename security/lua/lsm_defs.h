@@ -308,7 +308,7 @@ out:											\
 		*retp = ret;								\
 		return 0;								\
 	}										\
-	static noinline rettype __lua_lsm_slow_ ## NAME(DECL_ARGS_ ## x		\
+	static noinline rettype __lua_lsm_slow_ ## NAME(DECL_ARGS_ ## x			\
 				__MAP(x, __SC_DECL, __VA_ARGS__))			\
 	{										\
 		int ret;								\

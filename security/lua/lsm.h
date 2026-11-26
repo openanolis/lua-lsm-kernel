@@ -182,12 +182,6 @@ struct lvm_state {
 #endif
 };
 
-struct lua_lsm_task {
-	struct lvm_state *lvm;
-	bool lvm_teardown;
-	struct kvcache_dict *dict;
-};
-
 /* Internal glue between the core implementation files, not subsystem API. */
 extern unsigned int lua_lvm_pool_max;
 void lvm_pool_init_cpu(int cpu);
@@ -209,6 +203,12 @@ int lua_modules_index(lua_State *L);
 int lua_shared_index(lua_State *L);
 int lua_shared_newindex(lua_State *L);
 void lua_lsm_module_put_loaded_vm(struct lua_lsm_module *module);
+
+struct lua_lsm_task {
+	struct lvm_state *lvm;
+	bool lvm_teardown;
+	struct kvcache_dict *dict;
+};
 
 static inline struct lua_lsm_task *lua_lsm_task(const struct task_struct *task)
 {

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Lua based LSM
  *
@@ -8,31 +8,11 @@
 #define pr_fmt(fmt)	"lua-lsm: " fmt
 
 #include "debug.h"
-#include <linux/init.h>
-#include <linux/bitops.h>
-#include <linux/kstrtox.h>
-#include <linux/slab.h>
-#include <linux/string.h>
 #include <linux/printk.h>
-#include <linux/compiler.h>
-#include <linux/cpu.h>
-#include <linux/rwlock.h>
-#include <linux/cred.h>
 #include <linux/percpu.h>
-#include <linux/syscalls.h>	/* for __MAP */
-#include <linux/timekeeping.h>	/* for ktime_get */
-#include <linux/lsm_hooks.h>
-#include <uapi/linux/lsm.h>
+#include <linux/seq_file.h>
 #include <linux/lua.h>
-#include <linux/lualib.h>
-#include <linux/lauxlib.h>
-#include <linux/lockdep.h>
-#include <linux/srcu.h>
 #include "lsm.h"
-#include "lua_object.h"
-#include "lsm_defs.h"
-
-/********************************** stats **********************************/
 
 /* Used by module unregister */
 static atomic_t vm_nusage = ATOMIC_INIT(0);
@@ -106,7 +86,7 @@ void lvm_stats_vmfree(void)
 }
 
 void lvm_stats_memalloc(struct lvm_state *lvm, void *ptr,
-			       size_t osize, size_t nsize)
+			size_t osize, size_t nsize)
 {
 	lua_State *L = lvm->L;
 	int minimum, maximum, nbytes;
@@ -206,7 +186,7 @@ int lsm_funcs_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-#else
+#else	/* !CONFIG_SECURITY_LUA_LSM_STATS */
 
 void lvm_stats_vmalloc(void)
 {

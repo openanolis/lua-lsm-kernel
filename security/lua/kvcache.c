@@ -68,7 +68,8 @@ void kvcache_dict_init(struct kvcache_dict *dict)
 	dict->capacity = CACHE_CAPACITY;
 }
 
-static struct kvcache_dict *kvcache_dict_get_or_alloc(struct kvcache_dict **dictp)
+static struct kvcache_dict *
+kvcache_dict_get_or_alloc(struct kvcache_dict **dictp)
 {
 	struct kvcache_dict *dict, *fresh;
 

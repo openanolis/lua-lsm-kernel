@@ -45,10 +45,7 @@ __setup("lua.nodebug", disable_debug);
 
 #endif	/* ! DEBUG */
 
-/* Flag indicating whether initialization completed */
 int lua_lsm_initialized __initdata;
-
-/********************************* lsm hook *********************************/
 
 DEFINE_STATIC_KEY_FALSE(lua_lsm_modules_live);
 DEFINE_STATIC_KEY_FALSE(lua_lsm_modules_ever_registered);
@@ -74,9 +71,6 @@ struct lua_lsm_hook_stat lua_lsm_hook_stats[] = {
 
 #include <linux/lsm_hook_defs.h>
 #undef LSM_HOOK
-
-
-/*********************************** main ***********************************/
 
 int task_blob_init(struct task_struct *task)
 {
@@ -187,7 +181,6 @@ static int __init lua_lsm_init(void)
 		security_add_hooks(&lua_lsm_hooks[i], 1, &lua_lsmid);
 	}
 
-	/* Report that Lua-LSM successfully initialized */
 	lua_lsm_initialized = 1;
 
 	pr_info("Lua based LSM initialized (lvm_pool_max=%u)\n",
