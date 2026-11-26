@@ -252,8 +252,8 @@ int lua_lsm_module_register(const char *code, size_t len)
 		 * Once any Lua policy has been loaded, inactive free-hook cleanup
 		 * must stay armed for objects that outlive later module unload.
 		 */
-		static_branch_enable(&lua_lsm_inactive_cleanup_armed);
-		static_branch_inc(&lua_lsm_modules_active);
+		static_branch_enable(&lua_lsm_modules_ever_registered);
+		static_branch_inc(&lua_lsm_modules_live);
 	}
 	mutex_unlock(&modules_mutex);
 
@@ -414,7 +414,7 @@ static void lua_lsm_module_detach_locked(struct lua_lsm_module *module)
 	WARN_ON_ONCE(READ_ONCE(module->state) != LMS_STATE_LIVE);
 
 	WRITE_ONCE(module->state, LMS_STATE_GOING);
-	static_branch_dec(&lua_lsm_modules_active);
+	static_branch_dec(&lua_lsm_modules_live);
 	/* Order the state store before the loaded-VM count read below. */
 	smp_mb__after_atomic();
 	lua_lsm_module_unregister_hooks(module);

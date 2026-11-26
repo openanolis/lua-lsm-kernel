@@ -203,7 +203,7 @@ static inline int lua_lsm_dispatch_failret_errno(int default_ret __maybe_unused)
 
 static inline bool lua_lsm_hook_active(unsigned int nr)
 {
-	return static_branch_unlikely(&lua_lsm_modules_active) &&
+	return static_branch_unlikely(&lua_lsm_modules_live) &&
 	       atomic_read(&lua_lsm_hook_stats[nr].nhooks) != 0;
 }
 
@@ -232,7 +232,7 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 #define LUA_LSM_INACTIVE_CLEANUP(x, NAME, ...)						\
 	do {										\
 		if (lua_lsm_hook_has_inactive_cleanup(__LL_NR_ ## NAME) &&		\
-		    static_branch_unlikely(&lua_lsm_inactive_cleanup_armed)) {	\
+		    static_branch_unlikely(&lua_lsm_modules_ever_registered)) {		\
 			int idx = srcu_read_lock(&modules_ss);				\
 			__postpone_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));		\
 			srcu_read_unlock(&modules_ss, idx);				\
@@ -331,9 +331,9 @@ out:											\
 	rettype lua_lsm_ ## NAME(DECL_ARGS_ ## x					\
 				__MAP(x, __SC_DECL, __VA_ARGS__))			\
 	{										\
-		if (static_branch_unlikely(&lua_lsm_modules_active))			\
+		if (static_branch_unlikely(&lua_lsm_modules_live))			\
 			return __lua_lsm_slow_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));\
-		if (static_branch_unlikely(&lua_lsm_inactive_cleanup_armed))		\
+		if (static_branch_unlikely(&lua_lsm_modules_ever_registered))		\
 			return __lua_lsm_slow_ ## NAME(__MAP(x, __SC_ARGS, __VA_ARGS__));\
 		return (rettype)LSM_RET_DEFAULT(NAME);					\
 	}										\

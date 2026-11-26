@@ -23,8 +23,8 @@
 #include "bitmap.h"
 #include "kvcache.h"
 
-DECLARE_STATIC_KEY_FALSE(lua_lsm_modules_active);
-DECLARE_STATIC_KEY_FALSE(lua_lsm_inactive_cleanup_armed);
+DECLARE_STATIC_KEY_FALSE(lua_lsm_modules_live);
+DECLARE_STATIC_KEY_FALSE(lua_lsm_modules_ever_registered);
 
 /* Flag indicating whether initialization completed */
 extern int lua_lsm_initialized __initdata;

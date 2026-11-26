@@ -50,8 +50,8 @@ int lua_lsm_initialized __initdata;
 
 /********************************* lsm hook *********************************/
 
-DEFINE_STATIC_KEY_FALSE(lua_lsm_modules_active);
-DEFINE_STATIC_KEY_FALSE(lua_lsm_inactive_cleanup_armed);
+DEFINE_STATIC_KEY_FALSE(lua_lsm_modules_live);
+DEFINE_STATIC_KEY_FALSE(lua_lsm_modules_ever_registered);
 
 struct lua_lsm_hook_stat lua_lsm_hook_stats[] = {
 	#define LSM_HOOK(RET, DEFAULT, NAME, ...)			\
