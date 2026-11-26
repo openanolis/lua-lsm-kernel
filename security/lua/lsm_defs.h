@@ -270,7 +270,7 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 		lua_pushthread(L);							\
 		lua_getfenv(L, -1);			/* save thread.fenv */		\
 		/* 4th element: the per-VM module cache, keyed by module */		\
-		lvm_get_loaded_modules_table(L);					\
+		lvm_push_loaded_modules(L);						\
 		/* stack: [traceback, thread, env, modules] */				\
 		list_for_each_entry_srcu(module, &lsm_modules, list,			\
 					srcu_read_lock_held(&modules_ss)) {		\

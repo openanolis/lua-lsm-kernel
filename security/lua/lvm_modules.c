@@ -35,7 +35,7 @@
 static int loaded_modules_key;
 
 
-void lvm_get_loaded_modules_table(lua_State *L)
+void lvm_push_loaded_modules(lua_State *L)
 {
 	lua_pushlightuserdata(L, &loaded_modules_key);
 	lua_rawget(L, LUA_REGISTRYINDEX);
@@ -62,7 +62,7 @@ static bool lvm_remember_module(lua_State *L, struct lua_lsm_module *module)
 	int t, m;
 	bool fresh;
 
-	lvm_get_loaded_modules_table(L);
+	lvm_push_loaded_modules(L);
 	t = lua_gettop(L);
 	m = t - 1;
 
@@ -112,7 +112,7 @@ static bool lvm_forget_module(lua_State *L, struct lua_lsm_module *module)
 	return found;
 }
 
-bool lvm_drop_module(lua_State *L, struct lua_lsm_module *module)
+bool lvm_put_module(lua_State *L, struct lua_lsm_module *module)
 {
 	if (!lvm_forget_module(L, module))
 		return false;
@@ -128,7 +128,7 @@ static struct lua_lsm_module *lvm_next_loaded_module(lua_State *L)
 {
 	struct lua_lsm_module *module;
 
-	lvm_get_loaded_modules_table(L);
+	lvm_push_loaded_modules(L);
 	lua_pushnil(L);
 	if (lua_next(L, -2) != 0) {
 		module = lua_touserdata(L, -2);
@@ -254,7 +254,7 @@ static int lvm_module_load_thunk(lua_State *L)
 
 static bool lvm_cache_lookup(lua_State *L, struct lua_lsm_module *module)
 {
-	lvm_get_loaded_modules_table(L);
+	lvm_push_loaded_modules(L);
 	lua_pushlightuserdata(L, module);
 	lua_rawget(L, -2);
 	if (lua_istable(L, -1)) {
@@ -356,7 +356,7 @@ void lvm_put_loaded_modules(lua_State *L)
 	struct lua_lsm_module *module;
 
 	while ((module = lvm_next_loaded_module(L)))
-		lvm_drop_module(L, module);
+		lvm_put_module(L, module);
 }
 
 /********************************** Lua VM **********************************/

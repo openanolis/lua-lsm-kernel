@@ -341,7 +341,7 @@ static DEFINE_PER_CPU(struct irq_lvm_drop_ctx, irq_lvm_drop_ctx);
 static void irq_vm_drop_module(int cpu, struct lua_lsm_module *module)
 {
 	local_bh_disable();
-	lvm_drop_module(lvm_irq_state(cpu), module);
+	lvm_put_module(lvm_irq_state(cpu), module);
 	local_bh_enable();
 }
 

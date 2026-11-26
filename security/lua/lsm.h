@@ -153,7 +153,7 @@ bool lvm_current_task_teardown(void);
  * keys are never authoritative: a same-name re-registration installs a new
  * module object, and only identity-keyed lookups can tell them apart.
  */
-void lvm_get_loaded_modules_table(lua_State *L);
+void lvm_push_loaded_modules(lua_State *L);
 int lvm_get_module_table(lua_State *L, struct lua_lsm_module *module);
 
 int lua_lsm_module_register(const char *code, size_t len);
@@ -204,7 +204,7 @@ void lvm_stats_vmfree(void);
 void lvm_stats_memalloc(struct lvm_state *lvm, void *ptr,
 			size_t osize, size_t nsize);
 void lvm_put_loaded_modules(lua_State *L);
-bool lvm_drop_module(lua_State *L, struct lua_lsm_module *module);
+bool lvm_put_module(lua_State *L, struct lua_lsm_module *module);
 int lua_modules_index(lua_State *L);
 int lua_shared_index(lua_State *L);
 int lua_shared_newindex(lua_State *L);
