@@ -17,6 +17,8 @@ fail()
 
 [ -f "$POLICY" ] || fail "policy $POLICY not found"
 cat "$POLICY" > "$BASE/register" || fail "register stress module"
+echo 'set stress runtime ready boolean true' > "$SHDICT" ||
+	fail "seed dictionary"
 
 writer()
 {

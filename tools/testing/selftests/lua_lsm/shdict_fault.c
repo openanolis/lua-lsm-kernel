@@ -30,9 +30,9 @@ static int attempt(enum target target, unsigned int nth)
 		if (fd < 0)
 			return 2;
 	}
-	if (target == GET)
+	if (target == GET) {
 		snprintf(command, sizeof(command), "get faultcase runtime payload");
-	else {
+	} else {
 		n = snprintf(command, sizeof(command), "set faultcase runtime changed string ");
 		memset(command + n, 'z', 2048);
 		command[n + 2048] = 0;
@@ -40,9 +40,9 @@ static int attempt(enum target target, unsigned int nth)
 	snprintf(control, sizeof(control), "%u", nth);
 	if (sd_write(ctl, control))
 		return 2;
-	if (target == SNAPSHOT)
+	if (target == SNAPSHOT) {
 		result = read(fd, response, sizeof(response));
-	else if (target == OPEN) {
+	} else if (target == OPEN) {
 		opened = open(SD_BASE "shdict", O_RDWR);
 		result = opened;
 	} else {

@@ -7,6 +7,8 @@
 #include <time.h>
 #include "shdict_test.h"
 
+#define SEED_VALUE "ssssssssssssssssssssssssssssssss"
+
 static const char policy[] = "return {name='managebench',license='GPL-2.0',"
 	"inode_mkdir=function() return true end}";
 static pthread_barrier_t ready;
@@ -67,7 +69,8 @@ static void *work(void *arg)
 		if (!w->mixed || i % 4 == 0) {
 			ret = snapshot();
 		} else if (i % 4 == 1) {
-			ret = sd_expect(fd, "get managebench runtime seed", "ssssssssssssssssssssssssssssssss");
+			ret = sd_expect(fd, "get managebench runtime seed",
+					SEED_VALUE);
 		} else if (i % 4 == 2) {
 			ret = sd_expect(fd, set, "true");
 		} else {
@@ -79,7 +82,8 @@ static void *work(void *arg)
 
 					response[ret] = 0;
 					errno = 0;
-					ret = strtoull(response, &end, 10) > 0 && !errno && !*end ? 0 : -EIO;
+					ret = strtoull(response, &end, 10) > 0 &&
+					      !errno && !*end ? 0 : -EIO;
 				} else if (!ret) {
 					ret = -EIO;
 				}
@@ -127,10 +131,12 @@ int main(int argc, char **argv)
 	fd = open(SD_BASE "shdict", O_RDWR);
 	if (fd < 0)
 		return 1;
-	if (sd_expect(fd, "set managebench runtime seed string ssssssssssssssssssssssssssssssss", "true"))
+	if (sd_expect(fd, "set managebench runtime seed string " SEED_VALUE,
+		      "true"))
 		return 1;
 	for (i = 0; i < 128; i++) {
-		snprintf(cmd, sizeof(cmd), "set managebench runtime k%u string ssssssssssssssssssssssssssssssss", i);
+		snprintf(cmd, sizeof(cmd), "set managebench runtime k%u string %s",
+			 i, SEED_VALUE);
 		if (sd_expect(fd, cmd, "true"))
 			return 1;
 	}
@@ -139,7 +145,9 @@ int main(int argc, char **argv)
 	for (mode = 0; mode < 2 && !ret; mode++) {
 		for (threads = 1; threads <= 4 && !ret; threads *= 2) {
 			for (r = 1; r <= repeats && !ret; r++) {
-				if (sd_expect(fd, "set managebench runtime counter number 0", "true"))
+				if (sd_expect(fd,
+					      "set managebench runtime counter number 0",
+					      "true"))
 					return 1;
 				total = samples * threads;
 				latency = calloc(total, sizeof(*latency));

@@ -262,11 +262,14 @@ static int check_counter(int fd, struct scenario scenario,
 static int run_case(int fd, struct scenario scenario, unsigned int repeat,
 		    unsigned int samples, unsigned int warmup)
 {
+	static const char * const names[] = { "set", "get", "incr" };
 	struct worker workers[MAX_WORKERS] = {};
 	pthread_barrier_t ready, go;
-	uint64_t *latency, start = UINT64_MAX, end = 0, elapsed;
+	uint64_t *latency;
 	long double sum = 0;
-	static const char * const names[] = { "set", "get", "incr" };
+	uint64_t start = UINT64_MAX;
+	uint64_t end = 0;
+	uint64_t elapsed;
 	unsigned int i, per_worker = samples / scenario.threads;
 	int ret;
 
@@ -413,10 +416,13 @@ int main(int argc, char **argv)
 	       samples, repeats, warmup);
 	printf("# clock_pair_mean_ns=%.3f (not subtracted)\n", clock_sum / 10000.0);
 	puts("BENCH_CSV_BEGIN");
-	puts("op,bytes,threads,layout,repeat,requests,errors,elapsed_ns,ops_s,mean_us,p50_us,p95_us,p99_us,max_us");
+	puts("op,bytes,threads,layout,repeat,requests,errors,elapsed_ns,"
+	     "ops_s,mean_us,p50_us,p95_us,p99_us,max_us");
 	for (i = 0; i < 5; i++)
 		for (j = 0; j < 5; j++)
-			cases[i * 5 + j] = (struct scenario){ ops[i], bytes[i], threads[j], split[j] };
+			cases[i * 5 + j] = (struct scenario) {
+				ops[i], bytes[i], threads[j], split[j]
+			};
 	/* Rotate case order between repetitions to reduce fixed-order bias. */
 	for (r = 0; r < repeats; r++) {
 		for (i = 0; i < 25; i++) {

@@ -223,6 +223,12 @@ int main(int argc, char **argv)
 	alarm(180);
 	if (argc == 2 && !strcmp(argv[1], "--check")) {
 		ret = snapshot(buf);
+		if (ret >= 0) {
+			const char *row;
+
+			row = strstr(buf, "stress runtime ready boolean true\n");
+			ret = row && (row == buf || row[-1] == '\n') ? 0 : -ENODATA;
+		}
 		free(buf);
 		return ret < 0 ? KSFT_FAIL : KSFT_PASS;
 	}
@@ -256,13 +262,15 @@ int main(int argc, char **argv)
 			ksft_exit_fail_msg("seed hook padding\n");
 	}
 	ret = cached_snapshot(fd, buf);
-	ksft_test_result(!ret, "partial reads retain one snapshot across delete/create (errno=%d)\n", -ret);
+	ksft_test_result(!ret, "partial reads survive delete/create (errno=%d)\n",
+			 -ret);
 	failed |= !!ret;
 	ret = concurrent_snapshot(false, buf);
-	ksft_test_result(!ret, "cross-module updates: coherent snapshot or EAGAIN (errno=%d)\n", -ret);
+	ksft_test_result(!ret, "cross-module snapshot or EAGAIN (errno=%d)\n",
+			 -ret);
 	failed |= !!ret;
 	ret = concurrent_snapshot(true, buf);
-	ksft_test_result(!ret, "Lua hook updates across dictionaries: coherent snapshot or EAGAIN (errno=%d)\n", -ret);
+	ksft_test_result(!ret, "Lua hook snapshot or EAGAIN (errno=%d)\n", -ret);
 	failed |= !!ret;
 	close(fd);
 	free(buf);

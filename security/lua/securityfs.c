@@ -281,32 +281,125 @@ static int shdict_name_valid(const char *name)
 	return 0;
 }
 
+static int shdict_request_frame(char *input, size_t len)
+{
+	/* Literal NULs and multi-line commands are not valid text framing. */
+	if (memchr(input, '\0', len))
+		return -EINVAL;
+	while (len && (input[len - 1] == '\n' || input[len - 1] == '\r'))
+		input[--len] = '\0';
+	if (!len || memchr(input, '\n', len) || memchr(input, '\r', len))
+		return -EINVAL;
+	return 0;
+}
+
+static int shdict_parse_set(char *cursor, struct lua_lsm_shdict_request *req,
+			    char **decoded)
+{
+	const char *type = shdict_next_token(&cursor);
+	const char *value = shdict_rest(cursor);
+	size_t len;
+	int err;
+
+	if (!type)
+		return -EINVAL;
+	req->op = LUA_LSM_SHDICT_SET;
+	if (!strcmp(type, "boolean")) {
+		req->type = LUA_LSM_SHDICT_BOOLEAN;
+		if (!strcmp(value, "true"))
+			req->value.boolean = true;
+		else if (!strcmp(value, "false"))
+			req->value.boolean = false;
+		else
+			return -EINVAL;
+	} else if (!strcmp(type, "number")) {
+		req->type = LUA_LSM_SHDICT_NUMBER;
+		return kstrtoll(value, 10, &req->value.number);
+	} else if (!strcmp(type, "string")) {
+		req->type = LUA_LSM_SHDICT_STRING;
+		req->value.string.data = value;
+		req->value.string.len = strlen(value);
+	} else if (!strcmp(type, "hex")) {
+		len = strlen(value);
+		if (len & 1)
+			return -EINVAL;
+		len /= 2;
+		*decoded = kmalloc(len ?: 1, GFP_KERNEL);
+		if (!*decoded)
+			return -ENOMEM;
+		err = hex2bin(*decoded, value, len);
+		if (err)
+			return err;
+		req->type = LUA_LSM_SHDICT_STRING;
+		req->value.string.data = *decoded;
+		req->value.string.len = len;
+	} else {
+		return -EOPNOTSUPP;
+	}
+	return 0;
+}
+
+static int shdict_parse_request(char *cursor,
+				struct lua_lsm_shdict_request *req,
+				char **decoded)
+{
+	const char *op = shdict_next_token(&cursor);
+	const char *delta;
+	int err;
+
+	if (!op)
+		return -EINVAL;
+	req->module = shdict_next_token(&cursor);
+	req->dict = shdict_next_token(&cursor);
+	req->key = shdict_next_token(&cursor);
+	err = shdict_name_valid(req->module);
+	if (err)
+		return err;
+	err = shdict_name_valid(req->dict);
+	if (err)
+		return err;
+	err = shdict_name_valid(req->key);
+	if (err)
+		return err;
+
+	if (!strcmp(op, "set"))
+		return shdict_parse_set(cursor, req, decoded);
+	if (!strcmp(op, "get")) {
+		req->op = LUA_LSM_SHDICT_GET;
+	} else if (!strcmp(op, "delete")) {
+		req->op = LUA_LSM_SHDICT_DELETE;
+	} else if (!strcmp(op, "incr")) {
+		req->op = LUA_LSM_SHDICT_INCR;
+		delta = shdict_next_token(&cursor);
+		if (shdict_next_token(&cursor))
+			return -EINVAL;
+		req->value.number = 1;
+		return delta ? kstrtoll(delta, 10, &req->value.number) : 0;
+	} else {
+		return -EINVAL;
+	}
+	return shdict_next_token(&cursor) ? -EINVAL : 0;
+}
+
 static ssize_t shdict_write(struct file *file, const char __user *buf,
 			    size_t len, loff_t *ppos)
 {
 	struct shdict_ctx *ctx = file->private_data;
 	struct lua_lsm_shdict_request request = {};
 	char *decoded = NULL;
-	char *cursor;
 	char *input;
-	char *op;
-	char *type;
-	char *value;
-	s64 number;
-	size_t input_len;
-	size_t hex_len;
 	int err;
 
 	if (!lua_lsm_capable(CAP_MAC_ADMIN))
 		return -EPERM;
-	if (len == 0)
+	if (!len)
 		return -EINVAL;
 	if (len > SHDICT_IO_MAX)
 		return -E2BIG;
 	if (mutex_lock_interruptible(&ctx->lock))
 		return -ERESTARTSYS;
 
-	/* Every write replaces the response associated with this open file. */
+	/* Every accepted write replaces the response for this open file. */
 	ctx->len = 0;
 	ctx->pos = 0;
 	ctx->prepared = true;
@@ -314,132 +407,26 @@ static ssize_t shdict_write(struct file *file, const char __user *buf,
 	input = memdup_user_nul(buf, len);
 	if (IS_ERR(input)) {
 		err = PTR_ERR(input);
-		input = NULL;
-		goto out;
+		goto out_unlock;
 	}
 
-	/* Literal NULs and multi-line commands are not valid text framing. */
-	if (strnlen(input, len) != len) {
-		err = -EINVAL;
-		goto out;
-	}
-	input_len = len;
-	while (input_len && (input[input_len - 1] == '\n' ||
-			     input[input_len - 1] == '\r'))
-		input[--input_len] = '\0';
-	if (!input_len || memchr(input, '\n', input_len) ||
-	    memchr(input, '\r', input_len)) {
-		err = -EINVAL;
-		goto out;
-	}
+	err = shdict_request_frame(input, len);
+	if (err)
+		goto out_free;
 
-	cursor = input;
-	op = shdict_next_token(&cursor);
-	request.module = shdict_next_token(&cursor);
-	request.dict = shdict_next_token(&cursor);
-	request.key = shdict_next_token(&cursor);
-	err = -EINVAL;
-	if (!op)
-		goto out;
-	err = shdict_name_valid(request.module);
+	err = shdict_parse_request(input, &request, &decoded);
 	if (err)
-		goto out;
-	err = shdict_name_valid(request.dict);
-	if (err)
-		goto out;
-	err = shdict_name_valid(request.key);
-	if (err)
-		goto out;
-
-	if (!strcmp(op, "set")) {
-		request.op = LUA_LSM_SHDICT_SET;
-		type = shdict_next_token(&cursor);
-		if (!type) {
-			err = -EINVAL;
-			goto out;
-		}
-		value = shdict_rest(cursor);
-		if (!strcmp(type, "boolean")) {
-			request.type = LUA_LSM_SHDICT_BOOLEAN;
-			if (!strcmp(value, "true"))
-				request.value.boolean = true;
-			else if (!strcmp(value, "false"))
-				request.value.boolean = false;
-			else {
-				err = -EINVAL;
-				goto out;
-			}
-		} else if (!strcmp(type, "number")) {
-			request.type = LUA_LSM_SHDICT_NUMBER;
-			err = kstrtoll(value, 10, &number);
-			if (err)
-				goto out;
-			request.value.number = number;
-		} else if (!strcmp(type, "string")) {
-			request.type = LUA_LSM_SHDICT_STRING;
-			request.value.string.data = value;
-			request.value.string.len = strlen(value);
-		} else if (!strcmp(type, "hex")) {
-			hex_len = strlen(value);
-			if (hex_len & 1) {
-				err = -EINVAL;
-				goto out;
-			}
-			decoded = kmalloc(hex_len / 2 ?: 1, GFP_KERNEL);
-			if (!decoded) {
-				err = -ENOMEM;
-				goto out;
-			}
-			err = hex2bin(decoded, value, hex_len / 2);
-			if (err)
-				goto out;
-			request.type = LUA_LSM_SHDICT_STRING;
-			request.value.string.data = decoded;
-			request.value.string.len = hex_len / 2;
-		} else {
-			err = -EOPNOTSUPP;
-			goto out;
-		}
-	} else if (!strcmp(op, "get")) {
-		request.op = LUA_LSM_SHDICT_GET;
-		if (shdict_next_token(&cursor)) {
-			err = -EINVAL;
-			goto out;
-		}
-	} else if (!strcmp(op, "delete")) {
-		request.op = LUA_LSM_SHDICT_DELETE;
-		if (shdict_next_token(&cursor)) {
-			err = -EINVAL;
-			goto out;
-		}
-	} else if (!strcmp(op, "incr")) {
-		request.op = LUA_LSM_SHDICT_INCR;
-		value = shdict_next_token(&cursor);
-		if (shdict_next_token(&cursor)) {
-			err = -EINVAL;
-			goto out;
-		}
-		if (!value)
-			number = 1;
-		else {
-			err = kstrtoll(value, 10, &number);
-			if (err)
-				goto out;
-		}
-		request.value.number = number;
-	} else {
-		err = -EINVAL;
-		goto out;
-	}
+		goto out_free;
 
 	err = lua_lsm_shdict_call(&request, ctx->buf, SHDICT_IO_MAX, &ctx->len);
-	if (!err)
-		ctx->pos = 0;
-out:
+out_free:
 	kfree(decoded);
 	kfree(input);
+out_unlock:
 	mutex_unlock(&ctx->lock);
-	return err ?: len;
+	if (err)
+		return err;
+	return len;
 }
 
 static const struct file_operations fops_shdict = {
