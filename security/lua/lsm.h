@@ -154,6 +154,7 @@ int modules_show(struct seq_file *m, void *v);
 
 #ifdef CONFIG_SECURITY_LUA_LSM_STATS
 void lua_lsm_hook_stats_record(unsigned int nr, u64 delta);
+void lua_lsm_hook_stats_init_cpu(int cpu);
 void lvm_stats_show(struct seq_file *m);
 int lsm_funcs_show(struct seq_file *m, void *v);
 #endif
@@ -177,6 +178,28 @@ struct lua_lsm_task {
 	bool lvm_teardown;
 	struct kvcache_dict *dict;
 };
+
+/* Internal glue between the core implementation files, not subsystem API. */
+extern unsigned int lua_lvm_pool_max;
+void lvm_pool_init_cpu(int cpu);
+int lvm_irq_init(void);
+lua_State *lvm_irq_state(int cpu);
+void lvm_pool_put(struct lvm_state *lvm);
+void lvm_vm_reset(struct lvm_state *lvm);
+void lvm_mark_dirty(lua_State *L);
+int lua_state_alloc(struct lvm_state *lvm);
+void lua_state_free(struct lvm_state *lvm);
+int lvm_stats_vm_nusage(void);
+void lvm_stats_vmalloc(void);
+void lvm_stats_vmfree(void);
+void lvm_stats_memalloc(struct lvm_state *lvm, void *ptr,
+			size_t osize, size_t nsize);
+void lvm_put_loaded_modules(lua_State *L);
+bool lvm_drop_module(lua_State *L, struct lua_lsm_module *module);
+int lua_modules_index(lua_State *L);
+int lua_shared_index(lua_State *L);
+int lua_shared_newindex(lua_State *L);
+void lua_lsm_module_put_loaded_vm(struct lua_lsm_module *module);
 
 static inline struct lua_lsm_task *lua_lsm_task(const struct task_struct *task)
 {
