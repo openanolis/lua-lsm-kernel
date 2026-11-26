@@ -269,18 +269,21 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 		lua_pushcfunction(L, lua_traceback);					\
 		lua_pushthread(L);							\
 		lua_getfenv(L, -1);			/* save thread.fenv */		\
-		lua_getfield(L, LUA_REGISTRYINDEX, "_MODULES");				\
-		/* stack: [traceback, thread, env, _MODULES] */				\
+		/* 4th element: the per-VM module cache, keyed by module */		\
+		lvm_get_loaded_modules_table(L);					\
+		/* stack: [traceback, thread, env, modules] */				\
 		list_for_each_entry_srcu(module, &lsm_modules, list,			\
 					srcu_read_lock_held(&modules_ss)) {		\
 			if (!__BITMAP_ISSET(__LL_NR_ ## NAME, &module->hookfuncs))	\
 				continue;						\
 			if (READ_ONCE(module->state) != LMS_STATE_LIVE)			\
 				continue;						\
-			lua_getfield(L, -1, module->name);				\
+			/* identity lookup: a stale name key must not shadow */	\
+			if (!lvm_get_module_table(L, module))				\
+				continue;						\
 			lua_getfield(L, -1, #NAME);					\
 			WARN_ON(lua_gettop(L) != 6);					\
-			/* stack: [traceback, thread, env, _MODULES, _M, lfunc] */	\
+			/* stack: [traceback, thread, env, modules, _M, lfunc] */	\
 			if (lua_isfunction(L, -1)) {					\
 				int top = lua_gettop(L);				\
 				lua_getfenv(L, -1);					\

@@ -122,7 +122,7 @@ struct lua_lsm_module {
 	int nhooks;
 	char *chunk;
 	size_t chunk_len;
-	/* Lua VMs that currently have this module in their _MODULES table. */
+	/* Lua VMs that currently cache this module's table. */
 	atomic_t loaded_vm_count;
 	struct list_head shdicts;
 
@@ -146,6 +146,15 @@ extern struct srcu_struct modules_ss;
 lua_State *lvm_get(void);
 void lvm_put(lua_State *L);
 bool lvm_current_task_teardown(void);
+
+/*
+ * Per-VM module cache.  Each Lua VM keeps a registry table, keyed by the
+ * module pointer (lightuserdata), that maps a module to its table.  Name
+ * keys are never authoritative: a same-name re-registration installs a new
+ * module object, and only identity-keyed lookups can tell them apart.
+ */
+void lvm_get_loaded_modules_table(lua_State *L);
+int lvm_get_module_table(lua_State *L, struct lua_lsm_module *module);
 
 int lua_lsm_module_register(const char *code, size_t len);
 int lua_lsm_module_unregister(const char *name);

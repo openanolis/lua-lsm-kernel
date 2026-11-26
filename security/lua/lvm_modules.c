@@ -35,7 +35,7 @@
 static int loaded_modules_key;
 
 
-static void lvm_get_loaded_modules_table(lua_State *L)
+void lvm_get_loaded_modules_table(lua_State *L)
 {
 	lua_pushlightuserdata(L, &loaded_modules_key);
 	lua_rawget(L, LUA_REGISTRYINDEX);
@@ -50,31 +50,46 @@ static void lvm_get_loaded_modules_table(lua_State *L)
 	lua_rawget(L, LUA_REGISTRYINDEX);
 }
 
-static bool lvm_remember_module(lua_State *L,
-				struct lua_lsm_module *module)
+/*
+ * Remember a module in this VM's cache: loaded_modules[module] = _M.
+ *
+ * Creating an entry must always be paired with taking a loaded-VM
+ * reference for this VM when true is returned: entry present <=> count
+ * held (the pairing invariant).
+ */
+static bool lvm_remember_module(lua_State *L, struct lua_lsm_module *module)
 {
-	bool remembered;
+	int t, m;
+	bool fresh;
 
 	lvm_get_loaded_modules_table(L);
-	lua_pushlightuserdata(L, module);
-	lua_rawget(L, -2);
-	remembered = lua_toboolean(L, -1);
-	lua_pop(L, 1);
-	if (remembered) {
-		lua_pop(L, 1);
-		return false;
-	}
+	t = lua_gettop(L);
+	m = t - 1;
 
 	lua_pushlightuserdata(L, module);
-	lua_pushboolean(L, 1);
-	lua_rawset(L, -3);
+	lua_rawget(L, t);
+	fresh = lua_isnil(L, -1);
 	lua_pop(L, 1);
-	return true;
+
+	if (fresh) {
+		lua_pushlightuserdata(L, module);
+		lua_pushvalue(L, m);
+		lua_rawset(L, t);
+	}
+	lua_pop(L, 1);
+	return fresh;
 }
 
-static bool lvm_forget_module_ref(lua_State *L,
-				  struct lua_lsm_module *module)
+/*
+ * Remove a module's cache entry.
+ *
+ * Removing an entry must always be paired with dropping this VM's
+ * loaded-VM reference when true is returned: entry present <=> count
+ * held (the pairing invariant).
+ */
+static bool lvm_forget_module(lua_State *L, struct lua_lsm_module *module)
 {
+	int t;
 	bool found;
 
 	lua_pushlightuserdata(L, &loaded_modules_key);
@@ -83,53 +98,18 @@ static bool lvm_forget_module_ref(lua_State *L,
 		lua_pop(L, 1);
 		return false;
 	}
+	t = lua_gettop(L);
 
 	lua_pushlightuserdata(L, module);
-	lua_rawget(L, -2);
-	found = lua_toboolean(L, -1);
+	lua_rawget(L, t);
+	found = !lua_isnil(L, -1);
 	lua_pop(L, 1);
+
 	lua_pushlightuserdata(L, module);
 	lua_pushnil(L);
-	lua_rawset(L, -3);
+	lua_rawset(L, t);
 	lua_pop(L, 1);
 	return found;
-}
-
-static bool lvm_forget_module(lua_State *L, struct lua_lsm_module *module)
-{
-	int modules_idx;
-
-	/*
-	 * Clear only the Lua registry entries.  The caller owns garbage
-	 * collection and the loaded-VM count.
-	 */
-	lua_getfield(L, LUA_REGISTRYINDEX, "_MODULES");
-	if (lua_istable(L, -1)) {
-		modules_idx = lua_gettop(L);
-		lua_pushstring(L, module->name);
-		lua_rawget(L, modules_idx);
-		if (lua_istable(L, -1)) {
-			lua_pop(L, 1);
-
-			lua_pushstring(L, module->name);
-			lua_pushnil(L);
-			lua_rawset(L, modules_idx);
-
-			lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
-			if (lua_istable(L, -1)) {
-				lua_pushstring(L, module->name);
-				lua_pushnil(L);
-				lua_rawset(L, -3);
-			}
-			lua_pop(L, 1);
-
-		} else {
-			lua_pop(L, 1);
-		}
-	}
-	lua_pop(L, 1);
-
-	return lvm_forget_module_ref(L, module);
 }
 
 bool lvm_drop_module(lua_State *L, struct lua_lsm_module *module)
@@ -172,78 +152,187 @@ static int lua_module_fenv_newindex(lua_State *L)
 	return 0;
 }
 
+/*
+ * Load a module into a VM: build the module environment, run the chunk
+ * inside it, and leave the chunk's result — the module table _M — on top.
+ *
+ * Must be called from inside a Lua-called C frame (L->ci != L->base_ci):
+ * it writes LUA_ENVIRONINDEX, which lua_replace() rejects otherwise.  The
+ * only caller is the pcall'ed lvm_module_load_thunk(), which guarantees
+ * the frame and cleans up leftover slots via poscall truncation.
+ *
+ * in:  any stack (the thunk's module argument sits below)
+ * out: success: +1, _M on top;  failure: leftovers possible, caller
+ *      cleans up
+ */
 static int module_load(lua_State *L, struct lua_lsm_module *module)
 {
-	int err;
+	int env, modfunc, trace, err;
 
-	lua_newtable(L);			/* env */
-	lua_pushvalue(L, -1);
+	/*
+	 * Module environment: the chunk's globals.  Reads miss here and
+	 * resolve in _G (metatable __index); writes land in env itself
+	 * (the __newindex handler warns, then stores).
+	 */
+	lua_newtable(L);
+	env = lua_gettop(L);
+	lua_pushvalue(L, env);
 	lua_replace(L, LUA_ENVIRONINDEX);
 
-	/* Must be after lua_replace(LUA_ENVIRONINDEX) to ensure correct env */
+	/* env.MODULE_KEY = module: kvcache/shdict resolve their owner. */
 	lua_pushlightuserdata(L, MODULE_KEY);
 	lua_pushlightuserdata(L, module);
-	lua_settable(L, -3);			/* env.MODULE_KEY = module */
-	*newtask_nomain(L) = current;
-	lua_setfield(L, -2, "current");		/* env.current = current */
+	lua_settable(L, env);
 
-	lua_newtable(L);			/* shared table */
-	lua_createtable(L, 0, 2);		/* shared metatable */
+	*newtask_nomain(L) = current;
+	lua_setfield(L, env, "current");
+
+	/* env.shared = shared dict table with lazy metamethods */
+	lua_newtable(L);				/* shared table */
+	lua_createtable(L, 0, 2);			/* its metatable */
 	lua_pushcfunction(L, lua_shared_index);
 	lua_setfield(L, -2, "__index");
 	lua_pushcfunction(L, lua_shared_newindex);
 	lua_setfield(L, -2, "__newindex");
-	lua_setmetatable(L, -2);		/* setmetatable(shared, mt) */
-	lua_setfield(L, -2, "shared");		/* env.shared = shared */
+	lua_setmetatable(L, -2);			/* setmetatable(shared, mt) */
+	lua_setfield(L, env, "shared");
 
-	/* setmetatable(env, { __index = _G, __newindex = func }) */
-	lua_createtable(L, 0, 2);		/* metatable */
+	lua_createtable(L, 0, 2);
 	lua_pushvalue(L, LUA_GLOBALSINDEX);
-	lua_setfield(L, -2, "__index");		/* metatable.__index = _G */
+	lua_setfield(L, -2, "__index");
 	lua_pushcfunction(L, lua_module_fenv_newindex);
-	lua_setfield(L, -2, "__newindex");	/* metatable.__newindex = func */
-	lua_setmetatable(L, -2);		/* setmetatable(env, metatable) */
+	lua_setfield(L, -2, "__newindex");
+	lua_setmetatable(L, env);
 
+	/* Run the chunk with env as its fenv, traceback as errfunc. */
 	lua_pushcfunction(L, lua_traceback);
+	trace = lua_gettop(L);
 	err = luaL_loadbuffer_wrap(L, module->chunk,
 				   module->chunk_len, module->name);
 	if (err) {
-		lua_pop(L, 2);
+		lua_pop(L, 2);				/* traceback, env */
 		return err;
 	}
+	modfunc = lua_gettop(L);
 
-	/* stack: [env, traceback, modfunc] */
-	lua_pushvalue(L, -3);
-	lua_setfenv(L, -2);			/* setfenv(modfunc, env) */
+	lua_pushvalue(L, env);
+	lua_setfenv(L, modfunc);
 
-	err = lua_pcall_wrap(L, 0, 1, -2);
+	err = lua_pcall_wrap(L, 0, 1, trace);
 	if (err) {
-		lua_pop(L, 2);
+		lua_pop(L, 2);				/* traceback, env */
 		return err;
 	}
 
-	/* stack: [env, traceback, _M] */
+	/* The chunk must return its module table. */
 	if (!lua_istable(L, -1)) {
 		__log_err("module <%s> is not a table: top = %d [%s]\n",
 			  module->name, lua_gettop(L), luaL_typename(L, -1));
-		lua_pop(L, 3);
+		lua_pop(L, 3);				/* traceback, env, result */
 		return -EBADF;
 	}
 
-	lua_remove(L, -2);			/* remove traceback */
-	lua_remove(L, -2);			/* remove env */
-	/* NO error, only _M is returned */
+	/* stack: [.., env, traceback, _M] */
+	lua_remove(L, trace);
+	lua_remove(L, env);
 	return 0;
+}
+
+/*
+ * Trampoline that gives module_load() a Lua-called C frame.  Only ever
+ * invoked through lua_pcall_wrap() by lvm_load_module(): the frame makes
+ * the LUA_ENVIRONINDEX write legal, the pcall turns any Lua API error
+ * into an errno instead of an unprotected kernel panic, and poscall
+ * truncation discards module_load()'s leftovers on failure.
+ */
+static int lvm_module_load_thunk(lua_State *L)
+{
+	struct lua_lsm_module *module = lua_touserdata(L, 1);
+
+	return module_load(L, module) ? 0 : 1;
+}
+
+static bool lvm_cache_lookup(lua_State *L, struct lua_lsm_module *module)
+{
+	lvm_get_loaded_modules_table(L);
+	lua_pushlightuserdata(L, module);
+	lua_rawget(L, -2);
+	if (lua_istable(L, -1)) {
+		lua_remove(L, -2);
+		return true;
+	}
+	lua_pop(L, 2);
+	return false;
+}
+
+static bool lvm_load_module(lua_State *L, struct lua_lsm_module *module)
+{
+	int base = lua_gettop(L);
+	int err;
+
+	lua_pushlightuserdata(L, module);
+	lua_pushcfunction(L, lvm_module_load_thunk);
+	lua_insert(L, -2);
+	err = lua_pcall_wrap(L, 1, 1, 0);
+	if (err) {
+		__log_err("load: %s, err = %d, top = %d\n",
+			  module->name, err, lua_gettop(L));
+		lua_settop(L, base);
+		return false;
+	}
+
+	/* A failed load returns no result, nil-padded by the pcall. */
+	if (!lua_istable(L, -1)) {
+		lua_settop(L, base);
+		return false;
+	}
+	return true;
+}
+
+int lvm_get_module_table(lua_State *L, struct lua_lsm_module *module)
+{
+	int base = lua_gettop(L);
+	bool fresh;
+
+	if (lvm_cache_lookup(L, module))
+		return 1;
+
+	if (READ_ONCE(module->state) != LMS_STATE_LIVE)
+		return 0;
+
+	/* A load dirties the VM: pooled VMs must be reset, not reused. */
+	lvm_mark_dirty(L);
+
+	if (!lvm_load_module(L, module))
+		return 0;
+
+	/* Install into the cache and take the matching VM reference. */
+	fresh = lvm_remember_module(L, module);
+	if (fresh)
+		atomic_inc(&module->loaded_vm_count);
+
+	/*
+	 * Unregister can race with the load.  Recheck after the reference
+	 * is taken: either we see GOING and undo the reference we just
+	 * took, or unregister's barrier makes the late unload wait for our
+	 * SRCU read section to finish first.
+	 */
+	smp_mb__after_atomic();
+	if (READ_ONCE(module->state) != LMS_STATE_LIVE) {
+		if (fresh && lvm_forget_module(L, module))
+			lua_lsm_module_put_loaded_vm(module);
+		lua_settop(L, base);
+		return 0;
+	}
+
+	return 1;
 }
 
 int lua_modules_index(lua_State *L)
 {
 	const char *key = luaL_checkstring(L, 2);
 	struct lua_lsm_module *module;
-	bool remembered;
-	int err;
 
-	/* module queries are always run with a read lock */
 	list_for_each_entry_srcu(module, &lsm_modules, list,
 				 srcu_read_lock_held(&modules_ss)) {
 		if (READ_ONCE(module->state) != LMS_STATE_LIVE)
@@ -251,37 +340,7 @@ int lua_modules_index(lua_State *L)
 		if (strcmp(module->name, key) != 0)
 			continue;
 
-		lvm_mark_dirty(L);
-		err = module_load(L, module);
-		if (err) {
-			__log_err("load: %s, err = %d, top = %d\n",
-				  key, err, lua_gettop(L));
-			return 0;
-		}
-
-		remembered = lvm_remember_module(L, module);
-		if (remembered)
-			atomic_inc(&module->loaded_vm_count);
-
-		/*
-		 * A pre-existing SRCU reader can race with unregister after the
-		 * state check above.  Recheck after taking the VM reference so a
-		 * late per-CPU load cannot outlive the per-CPU drain.
-		 */
-		smp_mb__after_atomic();
-		if (READ_ONCE(module->state) != LMS_STATE_LIVE) {
-			if (remembered && lvm_forget_module(L, module))
-				lua_lsm_module_put_loaded_vm(module);
-			lua_pop(L, 1);
-			return 0;
-		}
-
-		lua_insert(L, -2);
-		lua_pushvalue(L, -2);
-		/* stack: [table, thunk, key, thunk] */
-		lua_rawset(L, 1);		/* table[key] = thunk */
-
-		return 1;			/* return the thunk */
+		return lvm_get_module_table(L, module);
 	}
 
 	__log_err("'%s' NOT found, top = %d\n", key, lua_gettop(L));
