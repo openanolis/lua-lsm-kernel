@@ -1,0 +1,211 @@
+# Automated code review for pull requests.
+#
+# The reviewer is the linux-code-review skill, expected out of tree at
+# /opt/lua-lsm-review/linux-code-review on the self-hosted runner. The model
+# credential is read from /etc/lua-lsm-review/bailian.env there; nothing
+# secret lives in this repository.
+#
+# Prerequisites on the runner host:
+#   * a self-hosted runner with the lua-lsm-review label,
+#   * the skill installed at /opt/lua-lsm-review/linux-code-review,
+#     including its sandbox/ directory,
+#   * the model key in /etc/lua-lsm-review/bailian.env, readable by the
+#     runner user,
+#   * bubblewrap and python3 available.
+#
+# Trust model: only commits authored by logins listed in the repository
+# variable AI_REVIEW_AUTHORS are reviewed. Set it to a comma-separated list
+# with no spaces (for example "chenzongyao200127"). While it is unset,
+# nothing runs. The agent itself runs inside a bubblewrap sandbox with a
+# cleared environment and no network route except loopback, where the
+# skill's sandbox/relay.py forwards to a host-side unix-socket proxy
+# (sandbox/proxy.py) that holds the real key. The sandbox sees a dummy key,
+# the PR checkout mounted read-only, and the skill -- nothing else; the
+# agent writes only into a dedicated output directory.
+#
+# Triggered only by a maintainer comment containing "/ai-review" on an
+# open PR, or manually. Both take this file from the default branch, so a
+# PR can never change the code that reviews it.
+name: ai-review
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: >-
+    ai-review-${{ github.event.pull_request.number ||
+    github.event.issue.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >
+      vars.AI_REVIEW_AUTHORS != '' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request != null &&
+        github.event.issue.state == 'open' &&
+        contains(format(',{0},', vars.AI_REVIEW_AUTHORS),
+                 format(',{0},', github.event.issue.user.login)) &&
+        contains(github.event.comment.body, '/ai-review') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+                 github.event.comment.author_association)))
+    runs-on: [self-hosted, Linux, X64, lua-lsm-review]
+    timeout-minutes: 90
+    env:
+      SKILL: /opt/lua-lsm-review/linux-code-review
+      PR_NUMBER: >-
+        ${{ github.event.pull_request.number || github.event.issue.number ||
+        inputs.pr_number }}
+    steps:
+      - name: Verify the commits are authored by a reviewer allowlist entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORS: ${{ vars.AI_REVIEW_AUTHORS }}
+        run: |
+          set -euo pipefail
+          test -n "$AUTHORS" || {
+            echo "::error::AI_REVIEW_AUTHORS is not configured" >&2
+            exit 1
+          }
+          authors=$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/commits" \
+            --jq '.[].author.login // "unlinked"')
+          echo "$authors" | sort | uniq -c
+          allowed=",$AUTHORS,"
+          while IFS= read -r a; do
+            case "$allowed" in
+              *",$a,"*) ;;
+              *)
+                echo "::error::refusing to review: commit author '$a'" \
+                  "is not in AI_REVIEW_AUTHORS" >&2
+                exit 1
+                ;;
+            esac
+          done <<< "$authors"
+
+      - name: Check out the PR head
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number ||
+            github.event.issue.number || inputs.pr_number }}/head
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Resolve PR coordinates
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          # The skill reviews merge-base(base)..HEAD. Ask GitHub for the
+          # current merge-base, then fetch only the PR's commit series
+          # instead of the kernel's full history.
+          n=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .commits)
+          case "$n" in
+            ''|*[!0-9]*) echo "unexpected commit count: $n" >&2; exit 1 ;;
+          esac
+          base_sha=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" \
+            --jq .base.sha)
+          base=$(gh api \
+            "repos/$GITHUB_REPOSITORY/compare/${base_sha}...${head}" \
+            --jq '.merge_base_commit.sha // empty')
+          test -n "$base" || {
+            echo "could not resolve the PR merge-base" >&2
+            exit 1
+          }
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          depth=$((n + 2))
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            fetch --no-tags --depth="$depth" origin "refs/pull/$PR_NUMBER/head"
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+              fetch --no-tags --deepen="$depth" origin "refs/pull/$PR_NUMBER/head"
+          fi
+          git cat-file -e "${base}^{commit}"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+
+      - name: Run linux-code-review (sandboxed)
+        env:
+          TMPDIR: ${{ runner.temp }}
+          BASE: ${{ steps.pr.outputs.base }}
+        run: |
+          set -euo pipefail
+          set -a; . /etc/lua-lsm-review/bailian.env; set +a
+          test -n "${DASHSCOPE_API_KEY:-}" || {
+            echo "DASHSCOPE_API_KEY is not configured on this runner" >&2
+            exit 1
+          }
+          harness="$SKILL/sandbox"
+          for f in linux_code_review.sh sandbox/sandbox.sh \
+                   sandbox/proxy.py sandbox/relay.py \
+                   sandbox/profile/profile.json sandbox/profile/config.toml; do
+            test -f "$SKILL/$f" || {
+              echo "missing $SKILL/$f: is the full skill installed?" >&2
+              exit 1
+            }
+          done
+          out="$RUNNER_TEMP/ai-review-out"
+          rm -rf "$out"; mkdir -p "$out"
+          sock="$RUNNER_TEMP/proxy-$GITHUB_RUN_ID.sock"
+          python3 "$harness/proxy.py" "$sock" &
+          proxy_pid=$!
+          trap 'kill "$proxy_pid" 2>/dev/null || true; rm -f "$sock"' EXIT
+          for _ in $(seq 1 100); do
+            [ -S "$sock" ] && break
+            sleep 0.1
+          done
+          [ -S "$sock" ] || { echo "the proxy did not start" >&2; exit 1; }
+          bash "$harness/sandbox.sh" \
+            "$GITHUB_WORKSPACE" "$SKILL" "$sock" "$BASE" "$out" \
+            2>&1 | tee "$RUNNER_TEMP/review.log"
+          # The sandbox shares this directory with the host: never let it
+          # point review.md at a host file through a link.
+          review="$out/review.md"
+          if [ -L "$review" ] || [ ! -f "$review" ]; then
+            echo "::error::the sandbox produced no regular review.md" >&2
+            exit 1
+          fi
+          dest="$RUNNER_TEMP/ai-review-upload"
+          rm -rf "$dest"; mkdir -p "$dest"
+          cp "$review" "$dest/review.md"
+
+      - name: Post the review
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
+        run: |
+          set -euo pipefail
+          review="$RUNNER_TEMP/ai-review-upload/review.md"
+          test -s "$review" || {
+            echo "the review produced no output" >&2
+            exit 1
+          }
+          "$SKILL/scripts/post_reviews_to_github.sh" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pr "$PR_NUMBER" \
+            --head-sha "$HEAD_SHA" \
+            --finalize --event comment "$review"
+
+      - name: Upload the review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-review-${{ github.event.pull_request.number ||
+            github.event.issue.number || inputs.pr_number }}
+          path: ${{ runner.temp }}/ai-review-upload/review.md
+          if-no-files-found: ignore

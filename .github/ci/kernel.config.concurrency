@@ -1,0 +1,38 @@
+# Concurrency-correctness CI kernel for the lua-lsm concurrency matrix.
+#
+# Merged on top of .github/ci/kernel.config. This fragment trades boot time
+# and image size for race/lock coverage: KCSAN flags data races, lockdep and
+# DEBUG_OBJECTS flag lifetime/locking bugs, and PREEMPT makes the interleaving
+# space much wider.
+#
+# The matrix boots WITHOUT panic_on_warn=1: this base kernel trips known
+# KCSAN reports in mm/fs on every boot, and panicking there reboots the VM
+# before any Lua-LSM code runs. The matrix allow-lists those exact headers
+# in concurrency.yaml; every other sanitizer/lockdep splat fails the cell.
+
+CONFIG_SMP=y
+CONFIG_PREEMPT=y
+
+CONFIG_KCSAN=y
+CONFIG_KCSAN_STRICT=y
+CONFIG_KCSAN_REPORT_ONCE_IN_MS=2000
+CONFIG_KCSAN_SELFTEST=y
+
+CONFIG_PROVE_LOCKING=y
+CONFIG_DEBUG_LOCK_ALLOC=y
+CONFIG_DEBUG_ATOMIC_SLEEP=y
+CONFIG_DEBUG_MUTEXES=y
+
+CONFIG_RCU_EXPERT=y
+CONFIG_PROVE_RCU_LIST=y
+
+CONFIG_DEBUG_OBJECTS=y
+CONFIG_DEBUG_OBJECTS_FREE=y
+CONFIG_DEBUG_OBJECTS_TIMERS=y
+CONFIG_DEBUG_OBJECTS_WORK=y
+CONFIG_DEBUG_OBJECTS_RCU_HEAD=y
+CONFIG_DEBUG_LIST=y
+
+# Same host-workaround as the base config: ptdump W+X audit trips on
+# eIBRS+ITS hosts for reasons unrelated to lua-lsm.
+CONFIG_DEBUG_WX=n

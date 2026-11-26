@@ -160,6 +160,22 @@ static const luaL_Reg cred_meth[] = {
 	{ NULL, NULL }
 };
 
+static int meth_cred_gc(lua_State *L)
+{
+	struct cred **credp = togccredp(L, 1);
+
+	if (*credp) {
+		put_cred(*credp);
+		*credp = NULL;
+	}
+	return 0;
+}
+
+static const luaL_Reg cred_gc_meth[] = {
+	{ "__gc",	meth_cred_gc	},
+	{ NULL, NULL }
+};
+
 /********************************* userns *********************************/
 
 static int kernel_userns_is_initial(lua_State *L)
@@ -262,7 +278,8 @@ static int kernel_task_pids(lua_State *L)
 static int kernel_task_cred(lua_State *L)
 {
 	struct task_struct *task = totask(L, 1);
-	*(const struct cred **)newcred(L) = get_task_cred(task);
+
+	*(const struct cred **)newgccred(L) = get_task_cred(task);
 	return 1;
 }
 
@@ -676,7 +693,7 @@ LUALIB_API int luaopen_kernel(lua_State *L)
 {
 	luaL_newlib(L, kernellib);
 	create_task_meta(L, task_meth, task_gc_meth);
-	create_cred_meta(L, cred_meth, NULL);
+	create_cred_meta(L, cred_meth, cred_gc_meth);
 	create_userns_meta(L, userns_meth, userns_gc_meth);
 	create_perfevent_meta(L, NULL, NULL);
 	create_ipc_meta(L, NULL, NULL);
