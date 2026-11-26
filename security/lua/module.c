@@ -325,53 +325,61 @@ err_free_lua:
 	return err;
 }
 
-/* The unregister caller holds modules_mutex until all works complete. */
-static struct lua_lsm_module *work_ctx_remove_module;
-static DEFINE_PER_CPU(struct work_struct, irq_lvm_drop_work);
+/* The per-CPU work item carries its own argument: the module to drop. */
+struct irq_lvm_drop_ctx {
+	struct work_struct work;
+	struct lua_lsm_module *module;
+};
 
-static void softirq_lvm_drop_module_on(int cpu)
+static DEFINE_PER_CPU(struct irq_lvm_drop_ctx, irq_lvm_drop_ctx);
+
+/*
+ * Drop the module from cpu's irq-context VM.  Softirqs are disabled so
+ * that a softirq or RCU callback cannot re-enter the same VM while it
+ * is being changed.
+ */
+static void irq_vm_drop_module(int cpu, struct lua_lsm_module *module)
 {
-	struct lua_lsm_module *module = work_ctx_remove_module;
-
-	WARN_ON(!work_ctx_remove_module);
-	/*
-	 * Disable softirq to prevent triggered softirq or RCU from
-	 * changing the Lua VM environment.
-	 */
 	local_bh_disable();
 	lvm_drop_module(lvm_irq_state(cpu), module);
 	local_bh_enable();
 }
 
-static void softirq_lvm_drop_module(struct work_struct *work)
+static void irq_lvm_drop_workfn(struct work_struct *work)
 {
-	softirq_lvm_drop_module_on(smp_processor_id());
+	struct irq_lvm_drop_ctx *ctx =
+		container_of(work, struct irq_lvm_drop_ctx, work);
+
+	irq_vm_drop_module(smp_processor_id(), ctx->module);
 }
 
-static void softirq_lvm_drop_modules(struct lua_lsm_module *module)
+/*
+ * Drop the module from every irq-context VM.  Must be called with
+ * modules_mutex held: the work items read ctx->module, and this
+ * function flushes them all before returning, so the pointer stays
+ * valid for the whole round.
+ */
+static void irq_vms_drop_module(struct lua_lsm_module *module)
 {
+	struct irq_lvm_drop_ctx *ctx;
 	int cpu;
 
 	lockdep_assert_held(&modules_mutex);
-	WARN_ON(!module);
-	if (!module)
-		return;
-
-	work_ctx_remove_module = module;
 
 	cpus_read_lock();
 	for_each_possible_cpu(cpu) {
-		INIT_WORK(per_cpu_ptr(&irq_lvm_drop_work, cpu),
-			  softirq_lvm_drop_module);
+		ctx = per_cpu_ptr(&irq_lvm_drop_ctx, cpu);
+		ctx->module = module;
+		INIT_WORK(&ctx->work, irq_lvm_drop_workfn);
 		if (!cpu_online(cpu)) {
-			softirq_lvm_drop_module_on(cpu);
+			irq_vm_drop_module(cpu, module);
 			continue;
 		}
-		WARN_ON_ONCE(!schedule_work_on(cpu, per_cpu_ptr(&irq_lvm_drop_work, cpu)));
+		WARN_ON_ONCE(!schedule_work_on(cpu, &ctx->work));
 	}
 	for_each_possible_cpu(cpu) {
 		if (cpu_online(cpu))
-			flush_work(per_cpu_ptr(&irq_lvm_drop_work, cpu));
+			flush_work(&per_cpu_ptr(&irq_lvm_drop_ctx, cpu)->work);
 	}
 	cpus_read_unlock();
 }
@@ -534,7 +542,7 @@ int lua_lsm_module_unregister(const char *name)
 	 */
 	remaining = atomic_read(&module->loaded_vm_count);
 	if (remaining > 0) {
-		softirq_lvm_drop_modules(module);
+		irq_vms_drop_module(module);
 
 		__log_info("Unregister module <%s> from pcpu VMs, remaining = %d\n",
 			   name, atomic_read(&module->loaded_vm_count));
