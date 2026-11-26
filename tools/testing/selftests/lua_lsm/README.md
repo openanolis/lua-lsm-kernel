@@ -16,16 +16,14 @@ shared.<dict>:set/get/incr -> kvcache -> Lua LSM hook
 This submission contains Task 2 only: shared-dictionary strings, userspace
 control, enumeration and their tests. It adds no architecture setjmp/longjmp
 implementation or Task 1 recovery tests. RISC-V architecture support is
-submitted separately in openanolis/lua-lsm-kernel PR #33.
+already available in the upstream base from commit `e8d2d4e1f`.
 
-The recorded RV64 results were obtained on the combined integration branch
+The historical October RV64 results were obtained on the integration branch
 `ospp/final-submission` (through `e05ced299`), including the separate Task 1
-implementation and the KASAN stack-unpoison follow-up in `aef506b09`. Apply
-those architecture prerequisites when reproducing RV64 debug validation;
-they are deliberately not included in this Task 2 diff. Other existing
-HAS_LUA-capable architectures do not require the RISC-V support patch. The
-Task 2 production code matches the tested integration revision, except for
-equivalent securityfs allocation/parser style cleanups for submission.
+implementation and the KASAN stack-unpoison follow-up in `aef506b09`.
+The November review follow-up was built directly from the updated Task 2
+branch with the upstream RISC-V support; it does not require applying those
+older integration commits. See `VALIDATION.md` for the results of each round.
 
 ## Request format
 
@@ -85,6 +83,10 @@ string is successful and produces a zero-byte response on the same file
 descriptor. Errors returned by the shared method are propagated as errno;
 for example, incrementing a boolean value fails with `EINVAL` and leaves
 the value unchanged.
+Numbers are signed 64-bit integers: incrementing outside their range fails
+with `ERANGE` and leaves the previous value intact. See
+[the testing ABI](../../../../Documentation/ABI/testing/securityfs-lua-lsm-shdict)
+for the full interface contract.
 
 The file mode is `0600`; open and every read/write also require
 `CAP_MAC_ADMIN`. The parser never evaluates userspace-provided Lua source.

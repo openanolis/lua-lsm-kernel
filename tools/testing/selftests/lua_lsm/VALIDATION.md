@@ -125,7 +125,7 @@ reads of an accepted per-open snapshot are unaffected by later mutations.
 | New snapshot regression | 3/3 in all profiles; partial-read retention, cross-module counters, Lua-hook counters across dictionaries |
 | Allocation failures | all 5 targets recovered; consumed points 1066/15/15/4/5 |
 | Separate kmemleak | empty before/after reports; includes new snapshot test and 10 lifecycle rounds |
-| Build/style | static selftests with -Werror, three kernel configs, git checks passed; kernel patch checkpatch 0 errors/warnings |
+| Build/style | static selftests with -Werror, three kernel configs, git checks passed |
 
 The new regression workload also ran against the old `e59a991df` image.
 It detected impossible first/second counter pairs in both the management
@@ -168,3 +168,32 @@ Logs/images/configs and performance raw.csv/summary.json are retained in the
 local `verify-enum.QsqB32` validation directory. Reproduce via the README's
 private initramfs workflow and the existing host runner. The permission and
 shared-FD transaction contracts have not changed.
+
+## PR #37 review follow-up — 2026-11-26
+
+The original commit (`a970bec40`) reports 0 errors, 35 warnings and 11
+checks with `scripts/checkpatch.pl --strict -g a970bec40`. The earlier
+zero-warning report covered a narrower patch and was not a result for the
+whole submitted commit.
+
+For the updated PR, check the complete diff, not just the follow-up commits:
+
+```sh
+git diff --no-ext-diff --no-renames upstream/lua-lsm...HEAD |
+    scripts/checkpatch.pl --strict --no-tree -
+```
+
+Against upstream `680bd9572`, this produced 0 errors, 21 warnings and 4
+checks. Remaining diagnostics include repeated words in mount arguments and
+request fixtures, split test strings, naming and alignment hints, and the
+generic `MAINTAINERS` reminder. No maintainer assignment is made here.
+
+The review revision was built on the updated upstream RV64 support, without
+the older integration-only architecture patches. Static selftests built
+with `-Werror`. The two-vCPU QEMU full suite passed in the normal kernel
+(20 complete unregister/re-register rounds) and in the KASAN/lockdep kernel
+(10 rounds). Both runs passed the signed increment limits and the exact
+65536-byte/oversized enumeration tests. The stress test checked a seeded
+enumeration row instead of treating an empty result as success.
+The separate fault-injection run passed all five cases: cold VM/bridge,
+string set, string get, enumeration and open.
