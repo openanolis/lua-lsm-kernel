@@ -1263,8 +1263,10 @@ int lua_lsm_module_register(const char *code, size_t len)
 		   module->name, (int)len, (int)chunk_len);
 
 	module->chunk = kmalloc(chunk_len, GFP_KERNEL);
-	if (!module->chunk)
+	if (!module->chunk) {
+		err = -ENOMEM;
 		goto err_free_module;
+	}
 	memcpy(module->chunk, chunk, chunk_len);
 	module->chunk_len = chunk_len;
 	atomic_set(&module->loaded_vm_count, 0);
