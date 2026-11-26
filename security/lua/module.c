@@ -61,25 +61,202 @@ static void lua_lsm_module_free(struct lua_lsm_module *module)
 	kfree(module);
 }
 
-int lua_lsm_module_register(const char *code, size_t len)
+/* Allocate a module object with its embedded state initialized. */
+static struct lua_lsm_module *module_create(void)
 {
-	struct lua_lsm_module *module, *m;
-	struct lvm_state lvm;
-	lua_State *L;
+	struct lua_lsm_module *module;
+
+	module = kzalloc(sizeof(*module), GFP_KERNEL);
+	if (!module)
+		return NULL;
+
+	__BITMAP_ZERO(&module->hookfuncs);
+	atomic_set(&module->loaded_vm_count, 0);
+	INIT_LIST_HEAD(&module->orphan);
+
+	INIT_LIST_HEAD(&module->shdicts);
+	spin_lock_init(&module->shdict_lock);
+	atomic_set(&module->shdict_count, 0);
+
+	INIT_LIST_HEAD(&module->kvnodes);
+	spin_lock_init(&module->kvnodes_lock);
+	atomic_set(&module->kvnodes_count, 0);
+	return module;
+}
+
+/* Result-table metadata fields copied straight into struct lua_lsm_module. */
+static const struct {
+	const char *field;
+	int type;
+	int offset;
+} module_fields[] = {
+	{ "name", LUA_TSTRING, offsetof(struct lua_lsm_module, name) },
+	{ "author", LUA_TSTRING, offsetof(struct lua_lsm_module, author) },
+	{ "description", LUA_TSTRING,
+	  offsetof(struct lua_lsm_module, description) },
+	{ "license", LUA_TSTRING, offsetof(struct lua_lsm_module, license) },
+	{ "version", LUA_TNUMBER, offsetof(struct lua_lsm_module, version) },
+	{ NULL }
+};
+
+/*
+ * Walk the module's result table: fill the metadata fields, count the
+ * hook functions, and set their bits in the hookfuncs bitmap.
+ *
+ * in:  [..., _M] (the result table on top)
+ * out: stack unchanged; module fields and hookfuncs filled
+ * returns 0, or -EOPNOTSUPP for a hook this build does not expose
+ * (on error the caller discards the loader VM, so no stack cleanup)
+ */
+static int module_table_extract(lua_State *L, struct lua_lsm_module *module)
+{
+	const char *key, *s;
+	int i;
+
+	lua_pushnil(L);
+	/* removes 'value' on every path; keeps 'key' for the next iteration */
+	while (lua_next(L, -2) != 0) {
+		if (!lua_isstring(L, -2)) {
+			__log_err("module table index must be a string\n");
+			goto pop_value;
+		}
+		key = lua_tostring(L, -2);
+
+		for (i = 0; module_fields[i].field; i++) {
+			if (strcmp(key, module_fields[i].field) == 0)
+				break;
+		}
+		if (module_fields[i].field) {
+			void *p = (char *)module + module_fields[i].offset;
+
+			if (lua_type(L, -1) == module_fields[i].type) {
+				switch (lua_type(L, -1)) {
+				case LUA_TSTRING:
+					s = lua_tostring(L, -1);
+					*(const char **)p = kstrdup(s, GFP_KERNEL);
+					break;
+				case LUA_TNUMBER:
+					*(int *)p = (int)lua_tointeger(L, -1);
+					break;
+				}
+			} else {
+				__log_err("field '%s' must be a %s\n", key,
+					  lua_typename(L, module_fields[i].type));
+			}
+			goto pop_value;
+		}
+
+		/* Not a metadata field: must be a hook function. */
+		for (i = 0; lua_lsm_hook_stats[i].name; i++) {
+			if (strcmp(lua_lsm_hook_stats[i].name, key) != 0)
+				continue;
+
+			if (!lua_lsm_hook_supported(i)) {
+				__log_err("hook '%s' is not supported by Lua-LSM\n",
+					  key);
+				return -EOPNOTSUPP;
+			}
+			if (!lua_isfunction(L, -1)) {
+				__log_err("field '%s' must be a function\n", key);
+				goto pop_value;
+			}
+
+			module->nhooks += 1;
+			__BITMAP_SET(i, &module->hookfuncs);
+			__log_info("hookfunc = %s\n", key);
+			goto pop_value;
+		}
+		__log_warn("field '%s' is unknown\n", key);
+pop_value:
+		lua_pop(L, 1);
+	}
+	return 0;
+}
+
+/*
+ * Recompile the source under the module's own name (so runtime errors
+ * carry it) and store the bytecode dump in module->chunk.
+ *
+ * in:  [..., _M]; source, len, and module->name
+ * out: chunk and chunk_len set; leftover compile stack is left in
+ * place, the caller discards the loader VM either way
+ * returns 0 or negative errno
+ */
+static int module_compile_chunk(lua_State *L, const char *code, size_t len,
+				struct lua_lsm_module *module)
+{
 	luaL_Buffer B;
 	const char *chunk;
 	size_t chunk_len;
-	int found = 0;
-	int i;
-	int status;
+	int func;
 	int err;
 
-	memset(&lvm, 0, sizeof(struct lvm_state));
-	err = lua_state_alloc(&lvm);
+	err = luaL_loadbuffer_wrap(L, code, len, module->name);
 	if (err)
 		return err;
 
-	L = lvm.L;
+	/* stack: [..., _M, func] */
+	func = lua_gettop(L);
+	luaL_checktype(L, func, LUA_TFUNCTION);
+
+	luaL_buffinit(L, &B);
+	if (lua_dump(L, lvm_writer, &B) != 0) {
+		__log_err("dump: unable to dump the function\n");
+		return -EFAULT;
+	}
+	luaL_pushresult(&B);
+	/* stack: [..., _M, func, chunk] */
+	chunk = lua_tolstring(L, func + 1, &chunk_len);
+	__log_info("[%s] compiled, source_len = %d, chunk_len = %d\n",
+		   module->name, (int)len, (int)chunk_len);
+
+	module->chunk = kmalloc(chunk_len, GFP_KERNEL);
+	if (!module->chunk)
+		return -ENOMEM;
+	memcpy(module->chunk, chunk, chunk_len);
+	module->chunk_len = chunk_len;
+	return 0;
+}
+
+/*
+ * Make the module globally visible.  Caller holds modules_mutex and
+ * has verified the name is unused.
+ */
+static void module_publish(struct lua_lsm_module *module)
+{
+	int i;
+
+	for (i = 0; lua_lsm_hook_stats[i].name; i++) {
+		if (__BITMAP_ISSET(i, &module->hookfuncs))
+			atomic_inc(&lua_lsm_hook_stats[i].nhooks);
+	}
+
+	WRITE_ONCE(module->state, LMS_STATE_LIVE);
+	list_add_tail_rcu(&module->list, &lsm_modules);
+	/*
+	 * Objects can outlive the module that last touched them, so
+	 * free-hook cleanup must stay enabled forever after the first
+	 * registration -- even while no module is live.
+	 */
+	static_branch_enable(&lua_lsm_modules_ever_registered);
+	static_branch_inc(&lua_lsm_modules_live);
+}
+
+int lua_lsm_module_register(const char *code, size_t len)
+{
+	struct lua_lsm_module *module, *m;
+	struct lvm_state loader;
+	lua_State *L;
+	bool exists;
+	int err;
+
+	memset(&loader, 0, sizeof(loader));
+	err = lua_state_alloc(&loader);
+	if (err)
+		return err;
+	L = loader.L;
+
+	/* Run the chunk in a private VM; it must return the module table. */
 	lua_pushcfunction(L, lua_traceback);
 	err = luaL_loadbuffer_wrap(L, code, len, "<lua-lsm:loader>");
 	if (err)
@@ -98,167 +275,38 @@ int lua_lsm_module_register(const char *code, size_t len)
 	}
 	__log_info("lua module loaded, top = %d\n", lua_gettop(L));
 
-	err = -ENOMEM;
-	module = kzalloc(sizeof(*module), GFP_KERNEL);
-	if (!module)
+	module = module_create();
+	if (!module) {
+		err = -ENOMEM;
 		goto err_free_lua;
-
-	__BITMAP_ZERO(&module->hookfuncs);
-
-	/* traversal the result table */
-	lua_pushnil(L);
-	while (lua_next(L, -2) != 0) {
-		static const struct {
-			const char *field;
-			int type;
-			int offset;
-		} fields[] = {
-			{ "name", LUA_TSTRING,
-			  offsetof(struct lua_lsm_module, name) },
-			{ "author", LUA_TSTRING,
-			  offsetof(struct lua_lsm_module, author) },
-			{ "description", LUA_TSTRING,
-			  offsetof(struct lua_lsm_module, description) },
-			{ "license", LUA_TSTRING,
-			  offsetof(struct lua_lsm_module, license) },
-			{ "version", LUA_TNUMBER,
-			  offsetof(struct lua_lsm_module, version) },
-			{ NULL }
-		};
-		const char *key, *s;
-		char *p;
-
-		if (!lua_isstring(L, -2)) {
-			__log_err("module table index must be a string\n");
-			lua_pop(L, 1);
-			continue;
-		}
-
-		key = lua_tostring(L, -2);
-
-		for (i = 0; fields[i].field; i++) {
-			if (strcmp(key, fields[i].field) != 0)
-				continue;
-
-			if (lua_type(L, -1) != fields[i].type) {
-				__log_err("field '%s' must be a %s\n",
-					  key, lua_typename(L, fields[i].type));
-				break;
-			}
-
-			p = (char *)module + fields[i].offset;
-			switch (lua_type(L, -1)) {
-			case LUA_TSTRING:
-				s = lua_tostring(L, -1);
-				*(const char **)p = kstrdup(s, GFP_KERNEL);
-				break;
-			case LUA_TNUMBER:
-				*(int *)p = (int)lua_tointeger(L, -1);
-				break;
-			}
-			break;
-		}
-
-		if (!fields[i].field) {
-			for (i = 0; lua_lsm_hook_stats[i].name; i++) {
-				if (strcmp(lua_lsm_hook_stats[i].name, key) != 0)
-					continue;
-
-				if (!lua_lsm_hook_supported(i)) {
-					__log_err("hook '%s' is not supported by Lua-LSM\n",
-						  key);
-					err = -EOPNOTSUPP;
-					goto err_free_module;
-				}
-
-				if (!lua_isfunction(L, -1)) {
-					__log_err("field '%s' must be a function\n", key);
-					break;
-				}
-
-				module->nhooks += 1;
-				__BITMAP_SET(i, &module->hookfuncs);
-
-				__log_info("hookfunc = %s\n", key);
-				break;
-			}
-
-			if (!lua_lsm_hook_stats[i].name)
-				__log_warn("field '%s' is unknown\n", key);
-		}
-
-		/* removes 'value'; keeps 'key' for next iteration */
-		lua_pop(L, 1);
 	}
+
+	err = module_table_extract(L, module);
+	if (err)
+		goto err_free_module;
 
 	err = -ENOMEM;
 	if (!module->name)
 		goto err_free_module;
 
-	/* Recompile with the new name */
-	err = luaL_loadbuffer_wrap(L, code, len, module->name);
+	err = module_compile_chunk(L, code, len, module);
 	if (err)
 		goto err_free_module;
 
-	/* dump function */
-	luaL_checktype(L, -1, LUA_TFUNCTION);
-	luaL_buffinit(L, &B);
-	status = lua_dump(L, lvm_writer, &B);
-	if (status != 0) {
-		__log_err("dump: unable to dump the function\n");
-		err = -EFAULT;
-		goto err_free_module;
-	}
-	luaL_pushresult(&B);
-	/* stack: [traceback, _M, func, chunk] */
-	chunk = lua_tolstring(L, -1, &chunk_len);
-	__log_info("[%s] compiled, source_len = %d, chunk_len = %d\n",
-		   module->name, (int)len, (int)chunk_len);
-
-	module->chunk = kmalloc(chunk_len, GFP_KERNEL);
-	if (!module->chunk) {
-		err = -ENOMEM;
-		goto err_free_module;
-	}
-	memcpy(module->chunk, chunk, chunk_len);
-	module->chunk_len = chunk_len;
-	atomic_set(&module->loaded_vm_count, 0);
-	INIT_LIST_HEAD(&module->orphan);
-
-	INIT_LIST_HEAD(&module->shdicts);
-	spin_lock_init(&module->shdict_lock);
-	atomic_set(&module->shdict_count, 0);
-
-	INIT_LIST_HEAD(&module->kvnodes);
-	spin_lock_init(&module->kvnodes_lock);
-	atomic_set(&module->kvnodes_count, 0);
-
+	exists = false;
 	mutex_lock(&modules_mutex);
 	list_for_each_entry(m, &lsm_modules, list) {
-		if (strcmp(module->name, m->name) == 0) {
-			found = 1;
+		if (strcmp(m->name, module->name) == 0) {
+			exists = true;
 			break;
 		}
 	}
-	if (!found) {
-		for (i = 0; lua_lsm_hook_stats[i].name; i++) {
-			if (__BITMAP_ISSET(i, &module->hookfuncs))
-				atomic_inc(&lua_lsm_hook_stats[i].nhooks);
-		}
-
-		WRITE_ONCE(module->state, LMS_STATE_LIVE);
-		list_add_tail_rcu(&module->list, &lsm_modules);
-		/*
-		 * Once any Lua policy has been loaded, inactive free-hook cleanup
-		 * must stay armed for objects that outlive later module unload.
-		 */
-		static_branch_enable(&lua_lsm_modules_ever_registered);
-		static_branch_inc(&lua_lsm_modules_live);
-	}
+	if (exists)
+		err = -EEXIST;
+	else
+		module_publish(module);
 	mutex_unlock(&modules_mutex);
-
-	err = -EEXIST;
-	if (found) {
+	if (exists) {
 		__log_err("module <%s> registered already\n", module->name);
 		goto err_free_module;
 	}
@@ -266,13 +314,13 @@ int lua_lsm_module_register(const char *code, size_t len)
 	pr_info("module <%s> registered with %d filters\n",
 		module->name, module->nhooks);
 
-	lua_state_free(&lvm);
+	lua_state_free(&loader);
 	return 0;
 
 err_free_module:
 	lua_lsm_module_free(module);
 err_free_lua:
-	lua_state_free(&lvm);
+	lua_state_free(&loader);
 
 	return err;
 }
