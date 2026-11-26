@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #define _GNU_SOURCE
 #include <grp.h>
+#include <limits.h>
 #include <linux/capability.h>
 #include <pthread.h>
 #include <sched.h>
@@ -15,6 +16,7 @@
 #define MODULE "boundary"
 #define THREADS 8
 #define LOOPS 500
+#define DUMP_LIMIT (64 * 1024)
 static const char policy[] = "return {name='boundary',license='GPL-2.0',"
 	"author='OSPP',file_open=function() return true end}";
 static pthread_barrier_t barrier;
@@ -186,25 +188,143 @@ static int overflow(int fd)
 	return ret == 1 ? 0 : -EIO;
 }
 
+static int incr_limits(int fd)
+{
+	static const struct {
+		long long inside;
+		long long limit;
+		int delta;
+	} cases[] = {
+		{ LLONG_MAX - 1, LLONG_MAX, 1 },
+		{ LLONG_MIN + 1, LLONG_MIN, -1 },
+	};
+	char cmd[128], value[32];
+	int i;
+
+	for (i = 0; i < (int)ARRAY_SIZE(cases); i++) {
+		snprintf(cmd, sizeof(cmd), "set boundary runtime limit number %lld",
+			 cases[i].inside);
+		if (sd_expect(fd, cmd, "true"))
+			return -EIO;
+		snprintf(cmd, sizeof(cmd), "incr boundary runtime limit %d",
+			 cases[i].delta);
+		snprintf(value, sizeof(value), "%lld", cases[i].limit);
+		if (sd_expect(fd, cmd, value) || sd_write(fd, cmd) != -ERANGE)
+			return -EIO;
+		if (sd_expect(fd, "get boundary runtime limit", value))
+			return -EIO;
+	}
+	return 0;
+}
+
+static int read_dump(char *buf, size_t size)
+{
+	int fd, ret;
+
+	fd = open(SD_BASE "shdict", O_RDONLY);
+	if (fd < 0)
+		return -errno;
+	ret = sd_read(fd, buf, size);
+	close(fd);
+	return ret;
+}
+
+static int exact_dump_limit(int fd)
+{
+	const int row_overhead = strlen("boundary exact k00 string ") + 1;
+	char cmd[2200], *buf;
+	int i = 0, remaining, len, text_len, ret, dump;
+	ssize_t n;
+
+	/* Account for rows from earlier tests before creating the last row. */
+	buf = malloc(DUMP_LIMIT + 1);
+	if (!buf)
+		return -ENOMEM;
+	ret = read_dump(buf, DUMP_LIMIT + 1);
+	if (ret < 0)
+		goto out;
+	remaining = DUMP_LIMIT - ret;
+	if (remaining < row_overhead) {
+		ret = -EIO;
+		goto out;
+	}
+
+	for (;;) {
+		len = snprintf(cmd, sizeof(cmd), "set boundary exact k%02d string ", i++);
+		text_len = remaining <= row_overhead + 2048 ?
+			remaining - row_overhead : 1024;
+		memset(cmd + len, 'x', text_len);
+		cmd[len + text_len] = '\0';
+		ret = sd_expect(fd, cmd, "true");
+		if (ret)
+			goto out;
+		remaining -= row_overhead + text_len;
+		if (!remaining)
+			break;
+	}
+
+	ret = read_dump(buf, DUMP_LIMIT + 1);
+	if (ret != DUMP_LIMIT || buf[DUMP_LIMIT - 1] != '\n') {
+		ret = -EIO;
+		goto out;
+	}
+
+	/* One byte over the limit must fail without returning a partial dump. */
+	cmd[len + text_len++] = 'x';
+	cmd[len + text_len] = '\0';
+	ret = sd_expect(fd, cmd, "true");
+	if (ret)
+		goto out;
+	dump = open(SD_BASE "shdict", O_RDONLY);
+	if (dump < 0) {
+		ret = -errno;
+		goto out;
+	}
+	n = read(dump, buf, 1);
+	ret = n < 0 && errno == E2BIG ? 0 : -EIO;
+	close(dump);
+out:
+	free(buf);
+	return ret;
+}
+
 int main(void)
 {
-	static const char * const names[] = { "ordinary user DAC denied", "root without MAC_ADMIN denied",
-		"inherited FD read and write recheck", "user namespace root denied",
-		"4096 accepted and 4097 refused", "concurrent first dictionary and atomic incr",
-		"same-key set/delete race", "enumeration overflow refuses partial success" };
+	static const char * const names[] = {
+		"ordinary user DAC denied",
+		"root without MAC_ADMIN denied",
+		"inherited FD read and write recheck",
+		"user namespace root denied",
+		"4096 accepted and 4097 refused",
+		"concurrent first dictionary and atomic incr",
+		"same-key set/delete race",
+		"enumeration overflow refuses partial success",
+		"incr range errors preserve the previous value",
+		"enumeration accepts 64 KiB, rejects 64 KiB plus one byte",
+	};
 	int fd, ret, failed = 0, i;
 
 	alarm(180);
 	ksft_print_header();
-	ksft_set_plan(8);
+	ksft_set_plan(ARRAY_SIZE(names));
 	if (sd_file(SD_BASE "register", policy))
 		ksft_exit_fail_msg("register boundary fixture\n");
 	fd = open(SD_BASE "shdict", O_RDWR);
 	if (fd < 0 || sd_expect(fd, "set boundary runtime p boolean true", "true"))
 		ksft_exit_fail_msg("prepare boundary fixture\n");
-	for (i = 0; i < 8; i++) {
-		ret = i < 4 ? child_permission(i, fd) : i == 4 ? length_limit(fd) :
-			i < 7 ? run_race(i == 6, fd) : overflow(fd);
+	for (i = 0; i < (int)ARRAY_SIZE(names); i++) {
+		if (i < 4)
+			ret = child_permission(i, fd);
+		else if (i == 4)
+			ret = length_limit(fd);
+		else if (i < 7)
+			ret = run_race(i == 6, fd);
+		else if (i == 7)
+			ret = overflow(fd);
+		else if (i == 8)
+			ret = incr_limits(fd);
+		else
+			ret = exact_dump_limit(fd);
 		ksft_test_result(!ret, "%s (errno=%d)\n", names[i], -ret);
 		failed |= !!ret;
 	}

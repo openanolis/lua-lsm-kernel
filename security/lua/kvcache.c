@@ -11,6 +11,8 @@
 #include <linux/vmalloc.h>
 #include <linux/string.h>
 #include <linux/errname.h>
+#include <linux/hex.h>
+#include <linux/overflow.h>
 #include <linux/rwlock.h>
 #include <linux/processor.h>
 #include <linux/lua.h>
@@ -601,13 +603,19 @@ update:
 		err = -EINVAL;
 		write_lock_irqsave(&node->lock, flags);
 		if (node->tt == LUA_TNUMBER) {
-			if (dict->snapshot_tracked)
-				shdict_snapshot_write_begin();
-			node->n += n;
-			n = node->n;
-			err = 0;
-			if (dict->snapshot_tracked)
-				shdict_snapshot_write_end();
+			lua_Number sum;
+
+			if (check_add_overflow(node->n, n, &sum)) {
+				err = -ERANGE;
+			} else {
+				if (dict->snapshot_tracked)
+					shdict_snapshot_write_begin();
+				node->n = sum;
+				n = sum;
+				err = 0;
+				if (dict->snapshot_tracked)
+					shdict_snapshot_write_end();
+			}
 		}
 		write_unlock_irqrestore(&node->lock, flags);
 		kvcache_node_drop(node);
@@ -699,6 +707,17 @@ void kvcache_dict_init(struct kvcache_dict *dict)
 	atomic_set_release(&dict->state, KVCACHE_DICT_READY);
 }
 
+static int kvcache_dump_bytes(char *buf, size_t size, size_t *pos,
+			      const char *bytes, size_t len)
+{
+	/* The response is length-delimited and needs no NUL terminator. */
+	if (len > size - *pos)
+		return -E2BIG;
+	memcpy(buf + *pos, bytes, len);
+	*pos += len;
+	return 0;
+}
+
 static int kvcache_dump_append(char *buf, size_t size, size_t *pos,
 			       const char *value, size_t len)
 {
@@ -708,15 +727,17 @@ static int kvcache_dump_append(char *buf, size_t size, size_t *pos,
 		unsigned char c = value[i];
 
 		if (c >= 0x20 && c < 0x7f && c != '\\') {
-			if (*pos + 1 >= size)
+			if (*pos == size)
 				return -E2BIG;
 			buf[(*pos)++] = c;
-			continue;
-		}
+		} else {
+			char escape[] = { '\\', 'x', hex_asc_hi(c), hex_asc_lo(c) };
+			int err;
 
-		if (*pos + 4 >= size)
-			return -E2BIG;
-		*pos += scnprintf(buf + *pos, size - *pos, "\\x%02x", c);
+			err = kvcache_dump_bytes(buf, size, pos, escape, sizeof(escape));
+			if (err)
+				return err;
+		}
 	}
 	return 0;
 }
@@ -818,94 +839,76 @@ void kvcache_dump_free(struct list_head *snapshots)
 	}
 }
 
+static int kvcache_dump_value(const struct kvcache_dump_entry *value,
+			      char *buf, size_t size, size_t *pos)
+{
+	char number[32];
+	int len, err;
+
+	switch (value->tt) {
+	case LUA_TBOOLEAN:
+		if (value->b)
+			return kvcache_dump_bytes(buf, size, pos, " boolean true\n",
+						  sizeof(" boolean true\n") - 1);
+		return kvcache_dump_bytes(buf, size, pos, " boolean false\n",
+					  sizeof(" boolean false\n") - 1);
+	case LUA_TNUMBER:
+		len = scnprintf(number, sizeof(number), " number %lld\n",
+				(long long)value->n);
+		return kvcache_dump_bytes(buf, size, pos, number, len);
+	case LUA_TSTRING:
+		err = kvcache_dump_bytes(buf, size, pos, " string ",
+					 sizeof(" string ") - 1);
+		if (err)
+			return err;
+		err = kvcache_dump_append(buf, size, pos, value->s->data,
+					  value->s->len);
+		if (err)
+			return err;
+		return kvcache_dump_bytes(buf, size, pos, "\n", 1);
+	case LUA_TLIGHTUSERDATA:
+		return kvcache_dump_bytes(buf, size, pos, " lightuserdata <hidden>\n",
+					  sizeof(" lightuserdata <hidden>\n") - 1);
+	default:
+		return -EINVAL;
+	}
+}
+
 /* Only called after global generation validation; data is already copied. */
-static int kvcache_dump_one(struct kvcache_dump_snapshot *snapshot,
+static int kvcache_dump_one(const struct kvcache_dump_snapshot *snapshot,
 			    char *buf, size_t size, size_t *pos)
 {
 	const char *module_name = snapshot->module_name;
 	const char *dict_name = snapshot->dict_name;
-	struct kvcache_node *node;
-	struct kvcache_dump_entry *value;
-	size_t count = snapshot->count, i;
-	int err = 0, n;
+	size_t i;
 
-	for (i = 0; i < count; i++) {
-		node = snapshot->entries[i].node;
+	for (i = 0; i < snapshot->count; i++) {
+		const struct kvcache_dump_entry *entry = &snapshot->entries[i];
+		int err;
+
 		err = kvcache_dump_append(buf, size, pos, module_name,
 					  strlen(module_name));
 		if (err)
-			goto out;
-		if (*pos + 1 >= size) {
-			err = -E2BIG;
-			goto out;
-		}
-		buf[(*pos)++] = ' ';
+			return err;
+		err = kvcache_dump_bytes(buf, size, pos, " ", 1);
+		if (err)
+			return err;
 		err = kvcache_dump_append(buf, size, pos, dict_name,
 					  strlen(dict_name));
 		if (err)
-			goto out;
-		if (*pos + 1 >= size) {
-			err = -E2BIG;
-			goto out;
-		}
-		buf[(*pos)++] = ' ';
-		err = kvcache_dump_append(buf, size, pos, node->key,
-					  strlen(node->key));
+			return err;
+		err = kvcache_dump_bytes(buf, size, pos, " ", 1);
 		if (err)
-			goto out;
-
-		value = &snapshot->entries[i];
-
-		switch (value->tt) {
-		case LUA_TBOOLEAN:
-			n = snprintf(buf + *pos, size - *pos, " boolean %s\n",
-				     value->b ? "true" : "false");
-			break;
-		case LUA_TNUMBER:
-			n = snprintf(buf + *pos, size - *pos, " number %lld\n",
-				     (long long)value->n);
-			break;
-		case LUA_TSTRING:
-			n = snprintf(buf + *pos, size - *pos, " string ");
-			if (n < 0 || n >= size - *pos) {
-				err = -E2BIG;
-				break;
-			}
-			*pos += n;
-			err = kvcache_dump_append(buf, size, pos, value->s->data,
-						  value->s->len);
-			if (!err) {
-				if (*pos + 1 >= size)
-					err = -E2BIG;
-				else
-					buf[(*pos)++] = '\n';
-			}
-			n = 0;
-			break;
-		case LUA_TLIGHTUSERDATA:
-			n = snprintf(buf + *pos, size - *pos,
-				     " lightuserdata <hidden>\n");
-			break;
-		default:
-			n = -EINVAL;
-			break;
-		}
-
+			return err;
+		err = kvcache_dump_append(buf, size, pos, entry->node->key,
+					  strlen(entry->node->key));
 		if (err)
-			goto out;
-		if (n < 0) {
-			err = n;
-			goto out;
-		}
-		if (n >= size - *pos) {
-			err = -E2BIG;
-			goto out;
-		}
-		*pos += n;
+			return err;
+		err = kvcache_dump_value(entry, buf, size, pos);
+		if (err)
+			return err;
 	}
-
-out:
-	return err;
+	return 0;
 }
 
 int kvcache_dump_format(struct list_head *snapshots, char *buf, size_t size,
