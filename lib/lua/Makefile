@@ -4,6 +4,7 @@ obj-$(CONFIG_LUA) += lua-core.o lua-lib.o
 
 lua-core-y := \
 	lapi.o \
+	lbudget.o \
 	lcode.o \
 	ldebug.o \
 	ldo.o \

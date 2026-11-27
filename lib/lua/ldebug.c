@@ -616,6 +616,8 @@ static void addinfo (lua_State *L, const char *msg) {
 
 
 void luaG_errormsg (lua_State *L) {
+  /* Do not enter a policy's error handler once its deadline has expired. */
+  luaD_checkbudget(L);
   if (L->errfunc != 0) {  /* is there an error handling function? */
     StkId errfunc = restorestack(L, L->errfunc);
     if (!ttisfunction(errfunc)) luaD_throw(L, LUA_ERRERR);

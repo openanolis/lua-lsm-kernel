@@ -969,20 +969,23 @@ LUA_API int lua_error (lua_State *L) {
 
 
 /**
- * lua_rethrow() - Propagate an error from a failed protected call
- * @L: Lua state with the failed call's error object on top of its stack
- * @status: Error status from the failed call, one of %LUA_ERRRUN,
- *	    %LUA_ERRSYNTAX, %LUA_ERRMEM or %LUA_ERRERR
+ * lua_rethrow() - Propagate a Lua error status
+ * @L: Lua state in which to raise the error
+ * @status: One of %LUA_ERRRUN, %LUA_ERRSYNTAX, %LUA_ERRMEM, %LUA_ERRERR or
+ *	    %LUA_ERRTIME
  *
- * Call from within an enclosing protected call. The error is propagated with
- * its original status.
+ * For an ordinary error from a failed protected call, leave its error object
+ * on top of the stack. %LUA_ERRTIME can also come from lua_budget_end().
+ * Timeout unwinding supplies its own nil error object.
  *
+ * Context: Trusted host code inside an enclosing protected call.
  * Return: This function never returns.
  */
 LUA_API int lua_rethrow (lua_State *L, int status) {
   lua_lock(L);
-  api_checknelems(L, 1);
-  api_check(L, status >= LUA_ERRRUN && status <= LUA_ERRERR);
+  api_check(L, status >= LUA_ERRRUN && status <= LUA_ERRTIME);
+  if (status != LUA_ERRTIME)
+    api_checknelems(L, 1);
   luaD_throw(L, status);
   lua_unlock(L);
   return 0;  /* to avoid warnings */

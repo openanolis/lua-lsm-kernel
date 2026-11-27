@@ -50,6 +50,11 @@ struct lua_longjmp {
 
 void luaD_seterrorobj (lua_State *L, int errcode, StkId oldtop) {
   switch (errcode) {
+    case LUA_ERRTIME: {
+      /* Timeout propagation must work even when allocation has failed. */
+      setnilvalue(oldtop);
+      break;
+    }
     case LUA_ERRMEM: {
       setsvalue2s(L, oldtop, luaS_newliteral(L, MEMERRMSG));
       break;
@@ -92,6 +97,8 @@ static void resetstack (lua_State *L, int status) {
 
 
 void luaD_throw (lua_State *L, int errcode) {
+  if (G(L)->budget_expired)
+    errcode = LUA_ERRTIME;
   if (L->errorJmp) {
     L->errorJmp->status = errcode;
     LUAI_THROW(L, L->errorJmp);
@@ -319,6 +326,8 @@ int luaD_precall (lua_State *L, StkId func, int nresults) {
     lua_unlock(L);
     n = (*curr_func(L)->c.f)(L);  /* do the actual call */
     lua_lock(L);
+    /* Includes pcall/xpcall/resume: no Lua instruction may catch a timeout. */
+    luaD_checkbudget(L);
     if (n < 0)  /* yielding? */
       return PCRYIELD;
     else {
