@@ -13,7 +13,22 @@
 #include "lsm.h"
 #include "kvcache.h"
 
-#define CURR_ENV	"_CURR_ENV"
+extern const int lua_lsm_current_env_key;
+#define CURR_ENV ((void *)&lua_lsm_current_env_key)
+
+static inline void lua_lsm_get_current_env(lua_State *L)
+{
+	lua_pushlightuserdata(L, CURR_ENV);
+	lua_rawget(L, LUA_REGISTRYINDEX);
+}
+
+/* Consume the environment at the top of the stack. */
+static inline void lua_lsm_set_current_env(lua_State *L)
+{
+	lua_pushlightuserdata(L, CURR_ENV);
+	lua_insert(L, -2);
+	lua_rawset(L, LUA_REGISTRYINDEX);
+}
 
 #define METHOD_NAME(name)	("method." #name)
 #define METHOD_NAME_RAW(name)	("method." #name ".raw")
@@ -32,7 +47,7 @@
 	static inline ctype *new ## name(lua_State *L)						\
 	{											\
 		ctype *p = new ## name ## _nomain(L);						\
-		lua_getfield(L, LUA_REGISTRYINDEX, CURR_ENV);					\
+		lua_lsm_get_current_env(L);						\
 		lua_setfenv(L, -2);								\
 		return p;									\
 	}											\

@@ -35,6 +35,7 @@ LUALIB_API int (luaopen_math) (lua_State *L);
 
 #define LUA_DBLIBNAME	"debug"
 LUALIB_API int (luaopen_debug) (lua_State *L);
+LUALIB_API void (lua_resetdebughook) (lua_State *L);
 
 #define LUA_LOADLIBNAME	"package"
 LUALIB_API int (luaopen_package) (lua_State *L);
