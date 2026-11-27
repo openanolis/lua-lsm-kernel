@@ -236,6 +236,7 @@ LUA_API int (lua_gc) (lua_State *L, int what, int data);
 */
 
 LUA_API int   (lua_error) (lua_State *L);
+LUA_API int   (lua_rethrow) (lua_State *L, int status);
 
 LUA_API int   (lua_next) (lua_State *L, int idx);
 

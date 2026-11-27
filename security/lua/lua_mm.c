@@ -279,7 +279,7 @@ void newvma(lua_State *L, struct vm_area_struct *vma,
 	ctx = lua_newuserdata(L, sizeof(*ctx));
 	ctx->file = NULL;
 	vma_set_meta(L);
-	lua_getfield(L, LUA_REGISTRYINDEX, CURR_ENV);
+	lua_lsm_get_current_env(L);
 	lua_setfenv(L, -2);
 
 	ctx->file = vma->vm_file ? get_file(vma->vm_file) : NULL;
