@@ -77,4 +77,5 @@ return M
 
 - `USAGE.md` - build/enable and runtime management
 - `API.md` - module format, hook returns, and core APIs
+- [`EXECUTION-BUDGET.md`](EXECUTION-BUDGET.md) - execution deadlines and recovery
 - `OBSERVABILITY.md` - stats, debug logs, and troubleshooting data

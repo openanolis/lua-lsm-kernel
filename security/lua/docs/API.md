@@ -77,23 +77,32 @@ callbacks and result conversion. Missing or non-function registered hooks also
 fail. Failed lazy loads are not cached and may be retried. Logs are rate-limited
 and identify the hook; the policy's `debug.traceback` is not called.
 
-`pcall`, `xpcall` and `coroutine.resume` retain ordinary Lua semantics: policies
-may catch errors and return an allow decision. Rethrow coroutine errors to fail
-the outer dispatch. There is no whole-policy time or instruction budget.
+`pcall`, `xpcall` and `coroutine.resume` retain ordinary Lua error semantics:
+policies may catch ordinary errors and return an allow decision. Rethrow
+ordinary coroutine errors to fail the outer dispatch. Execution timeouts are
+fatal to the dispatch and propagate through these functions.
+
+Each module has one monotonic wall-time deadline for each hook invocation,
+including its first lazy load, callbacks and coroutines. Time spent descheduled
+counts. Normal task and atomic contexts have different limits. See
+[Execution budgets](EXECUTION-BUDGET.md) for limits, examples and boundaries.
+Timeouts use the existing execution-failure mapping (`-EIO` for errno hooks).
 
 On success and failure, dispatch restores the Lua stack, thread/current-policy
 environments and C debug-hook settings. Main-thread Lua debug hooks and their
 callback references are cleared after each module and again on dispatch exit.
-Allocated `inode_getsecurity` output is passed to the caller only after protected
-dispatch succeeds. Failure frees any staged output and preserves the caller's
-buffer. Length-only queries (`alloc=false`) do not allocate output.
+Allocated `inode_getsecurity` output is passed to the caller after protected
+dispatch and the final deadline check succeed. Failure frees any staged output
+and preserves the caller's buffer. Length-only queries (`alloc=false`) do not
+allocate output.
 
 Policy/shared-dictionary writes, kernel side effects and coroutine-local state
 are not rolled back.
 
 Kernel resources acquired by policies or C helpers require their own cleanup.
-Pair `kernel.rcu_read_lock()` with `kernel.rcu_read_unlock()`; catch errors
-inside the critical section, unlock, then rethrow. Internal registry mutation,
+Explicit Lua-managed RCU critical sections spanning Lua execution require
+cleanup that a fatal timeout can skip. Use C helpers that acquire and release
+resources within one call. Internal registry mutation,
 task-VM reentry and NMI/hardirq invocation remain unsupported.
 
 ## Listing hook names

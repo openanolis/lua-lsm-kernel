@@ -16,6 +16,18 @@
 
 #define LSM_RET_DEFAULT(NAME)	(NAME##_default)
 
+/* Wall time includes descheduling. Select the limit at module entry. */
+#define LUA_LSM_BUDGET_TASK_NS (20ULL * NSEC_PER_MSEC)
+#define LUA_LSM_BUDGET_ATOMIC_NS (2ULL * NSEC_PER_MSEC)
+
+static inline u64 lua_lsm_budget_ns(void)
+{
+	/* Without preempt counts, conservatively use the shorter deadline. */
+	return !IS_ENABLED(CONFIG_PREEMPT_COUNT) || !in_task() || in_atomic() ||
+	       irqs_disabled() || rcu_preempt_depth() > 0 ?
+		LUA_LSM_BUDGET_ATOMIC_NS : LUA_LSM_BUDGET_TASK_NS;
+}
+
 #define LSM_HOOK(RET, DEFAULT, NAME, ...)						\
 	extern const int __maybe_unused LSM_RET_DEFAULT(NAME);
 #include <linux/lsm_hook_defs.h>
@@ -220,6 +232,8 @@ static inline int lua_lsm_dispatch(lua_State *L, lua_CFunction dispatch,
 	lua_pushvalue(L, -1);
 	lua_rawget(L, LUA_REGISTRYINDEX);
 	status = lua_cpcall(L, dispatch, args);
+	if (lua_budget_end(L))
+		status = LUA_ERRTIME;
 	lua_resetdebughook(L);
 	lua_sethook(L, oldhook, oldmask, oldcount);
 	lua_pushvalue(L, top + 3);
@@ -342,6 +356,9 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 				continue;						\
 			if (module->state != LMS_STATE_LIVE)				\
 				continue;						\
+			if (lua_budget_end(L)) \
+				return lua_rethrow(L, LUA_ERRTIME); \
+			lua_budget_begin(L, lua_lsm_budget_ns()); \
 			lua_getfield(L, -1, module->name);				\
 			lua_getfield(L, -1, #NAME);					\
 			WARN_ON(lua_gettop(L) != 5);					\
@@ -357,9 +374,12 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 						__MAP(x, __LUA_ARG, __VA_ARGS__));	\
 				END_VM_CALL_ ## vmtype(pcalltype, L, top, ret);		\
 			} else {							\
-				return luaL_error(L, "hook '%s' is not a function", #NAME);\
+				return luaL_error( \
+					L, "hook '%s' is not a function", \
+					#NAME); \
 			}								\
 			lua_resetdebughook(L);						\
+			/* Keep the deadline active through return and GC. */ \
 			lua_pop(L, 1);			/* pop _M */			\
 			RET_CHECK_ ## pcalltype(NAME, ret);				\
 		}									\
@@ -382,7 +402,9 @@ static inline bool lua_lsm_hook_has_inactive_cleanup(unsigned int nr)
 		if (!L) {								\
 			if (!lvm_current_task_teardown()) {				\
 				err = -ENOMEM;						\
-				pr_err_ratelimited("hook %s failed: VM unavailable\n", #NAME);\
+				pr_err_ratelimited( \
+					"hook %s failed: VM unavailable\n", \
+					#NAME); \
 			}								\
 			goto out;							\
 		}									\
