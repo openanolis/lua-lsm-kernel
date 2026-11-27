@@ -83,8 +83,13 @@ the outer dispatch. There is no whole-policy time or instruction budget.
 
 On success and failure, dispatch restores the Lua stack, thread/current-policy
 environments and C debug-hook settings. Main-thread Lua debug hooks and their
-callback references are cleared on exit. Policy/shared-dictionary writes,
-kernel side effects and coroutine-local state are not rolled back.
+callback references are cleared after each module and again on dispatch exit.
+Allocated `inode_getsecurity` output is passed to the caller only after protected
+dispatch succeeds. Failure frees any staged output and preserves the caller's
+buffer. Length-only queries (`alloc=false`) do not allocate output.
+
+Policy/shared-dictionary writes, kernel side effects and coroutine-local state
+are not rolled back.
 
 Kernel resources acquired by policies or C helpers require their own cleanup.
 Pair `kernel.rcu_read_lock()` with `kernel.rcu_read_unlock()`; catch errors
