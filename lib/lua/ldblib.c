@@ -255,7 +255,14 @@ static void gethooktable (lua_State *L) {
 }
 
 
-/* Kernel dispatch cleanup must also work after an allocation failure. */
+/**
+ * lua_resetdebughook() - Clear a thread's debug hook
+ * @L: Lua thread whose hook is being cleared
+ *
+ * Clear the thread's C debug hook and its Lua callback in the registry. This
+ * uses no allocating Lua operations and is safe after %LUA_ERRMEM. The caller
+ * is responsible for restoring any previous hook.
+ */
 LUALIB_API void lua_resetdebughook (lua_State *L) {
   lua_sethook(L, NULL, 0, 0);
   lua_pushlightuserdata(L, (void *)&KEY_HOOK);

@@ -35,16 +35,7 @@ LUALIB_API int (luaopen_math) (lua_State *L);
 
 #define LUA_DBLIBNAME	"debug"
 LUALIB_API int (luaopen_debug) (lua_State *L);
-
-/**
- * lua_resetdebughook() - Clear a thread's debug hook
- * @L: Lua thread whose hook is being cleared
- *
- * Clear the thread's C debug hook and its Lua callback in the registry. This
- * uses no allocating Lua operations and is safe after %LUA_ERRMEM. The caller
- * is responsible for restoring any previous hook.
- */
-LUALIB_API void lua_resetdebughook(lua_State *L);
+LUALIB_API void (lua_resetdebughook) (lua_State *L);
 
 #define LUA_LOADLIBNAME	"package"
 LUALIB_API int (luaopen_package) (lua_State *L);

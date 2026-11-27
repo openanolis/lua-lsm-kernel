@@ -968,6 +968,17 @@ LUA_API int lua_error (lua_State *L) {
 }
 
 
+/**
+ * lua_rethrow() - Propagate an error from a failed protected call
+ * @L: Lua state with the failed call's error object on top of its stack
+ * @status: Error status from the failed call, one of %LUA_ERRRUN,
+ *	    %LUA_ERRSYNTAX, %LUA_ERRMEM or %LUA_ERRERR
+ *
+ * Call from within an enclosing protected call. The error is propagated with
+ * its original status.
+ *
+ * Return: This function never returns.
+ */
 LUA_API int lua_rethrow (lua_State *L, int status) {
   lua_lock(L);
   api_checknelems(L, 1);
